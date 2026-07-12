@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL AVANCÉ (100% SANS YAML)
+// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -12,228 +12,142 @@ class AllAreasDisplayEditor extends HTMLElement {
     if (this._formElement) {
       this._formElement.hass = hass;
     }
-    // Propager Hass aux sous-éditeurs visuels des cartes
-    const subEditors = this.querySelectorAll("hui-card-element-editor");
-    subEditors.forEach(editor => { editor.hass = hass; });
   }
 
   _render() {
-    if (this.querySelector("#layout-form")) {
-      this._updateFormSchema();
-      return;
-    }
+    if (this._formElement) return;
 
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
+        <h3 style="margin: 0; color: var(--primary-color);">Configuration de la Mise en Page</h3>
+        <ha-form id="layout-form"></ha-form>
         
-        <!-- 1. MISE EN PAGE -->
-        <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">Configuration de la Mise en Page</h3>
-          <ha-form id="layout-form"></ha-form>
-        </div>
+        <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 5px 0;">
         
-        <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
-        
-        <!-- 2. GESTION DES COMPOSANTS PAR PIÈCE -->
-        <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">Composants à répéter par pièce</h3>
-          <p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Ajoute tes cartes. Chacune aura son éditeur visuel dédié en dessous (comme dans Bubble Card).
-          </p>
-          
-          <!-- Conteneur des éditeurs visuels de cartes -->
-          <div id="sub-editors-container" style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px;"></div>
+        <h3 style="margin: 0; color: var(--primary-color);">Configuration du Bouton (Modèle par défaut)</h3>
+        <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
+          Configure l'action et l'affichage de base. Si tu utilises <code>button_template</code> en YAML, cela remplacera ces réglages graphiques.
+        </p>
+        <ha-form id="button-form"></ha-form>
 
-          <!-- Menu d'ajout rapide -->
-          <div style="display: flex; gap: 10px; align-items: center; background: var(--secondary-background-color); padding: 12px; border-radius: 8px; border: 1px dashed var(--divider-color);">
-            <select id="card-type-selector" style="flex-grow: 1; height: 40px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font-size: 0.95em;">
-              <option value="" disabled selected>Choisir un élément à ajouter...</option>
-              <option value="tile">Carte Tuile (Tile)</option>
-              <option value="button">Carte Bouton (Button)</option>
-              <option value="entities">Carte Liste d'Entités (Entities)</option>
-              <option value="custom:mushroom-template-card">Mushroom Template Card</option>
-              <option value="custom:bubble-card">Bubble Card (Popup/Button)</option>
-            </select>
-            <button id="add-card-btn" style="background: var(--primary-color); color: white; border: none; border-radius: 4px; width: 40px; height: 40px; font-size: 1.5em; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold;">+</button>
-          </div>
+        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 10px; border-radius: 6px;">
+          <strong>Variables utilisables (Éditeur YAML) :</strong><br>
+          <code>[[area_name]]</code>, <code>[[area_icon]]</code>, <code>[[area_slug]]</code>, <code>[[area_temp]]</code>, <code>[[area_humidity]]</code>, <code>[[default_entity]]</code>
         </div>
       </div>
     `;
 
     this._formElement = this.querySelector("#layout-form");
-    this._selector = this.querySelector("#card-type-selector");
-    this._addButton = this.querySelector("#add-card-btn");
+    this._buttonFormElement = this.querySelector("#button-form");
 
-    // Événement : Changement du mode de mise en page globale
+    // Schéma pour la mise en page globale
+    const layoutSchema = [
+      {
+        name: "layout_type",
+        label: "Type d'affichage",
+        type: "select",
+        options: [
+          ["grid", "Grille (Grid)"],
+          ["horizontal", "Alignement Horizontal (Stack)"],
+          ["vertical", "Alignement Vertical (Stack)"]
+        ],
+        default: "grid"
+      },
+      {
+        name: "columns",
+        label: "Nombre de colonnes (uniquement pour le mode Grille)",
+        type: "integer",
+        default: 2,
+        valueMin: 1,
+        valueMax: 6
+      }
+    ];
+
+    // Schéma pour concevoir visuellement le comportement du bouton
+    const buttonSchema = [
+      {
+        name: "nav_type",
+        label: "Type de navigation",
+        type: "select",
+        options: [
+          ["popup", "Ouvrir une Popup (#slug_de_la_pièce)"],
+          ["path", "Aller vers un chemin / une page"]
+        ],
+        default: "popup"
+      },
+      {
+        name: "base_path",
+        label: "Chemin de base (ex: /lovelace-pieces/ ou laisser vide pour racine)",
+        type: "string",
+        default: ""
+      }
+    ];
+
+    // Récupération des données existantes ou application des valeurs par défaut
+    const layoutData = {
+      layout_type: this._config?.layout_type || "grid",
+      columns: this._config?.layout_options?.columns || 2
+    };
+
+    const buttonData = {
+      nav_type: this._config?.gui_settings?.nav_type || "popup",
+      base_path: this._config?.gui_settings?.base_path || ""
+    };
+
+    this._formElement.schema = layoutSchema;
+    this._formElement.data = layoutData;
+
+    this._buttonFormElement.schema = buttonSchema;
+    this._buttonFormElement.data = buttonData;
+
+    // Écouteur pour la mise en page
     this._formElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
-      let targetLayout = value.layout_type;
       
+      // On adapte dynamiquement le type de conteneur interne de Home Assistant
+      let targetType = "grid";
+      if (value.layout_type === "horizontal") targetType = "horizontal-stack";
+      if (value.layout_type === "vertical") targetType = "vertical-stack";
+
       const newConfig = {
         ...this._config,
-        layout_type: targetLayout,
+        layout_type: targetType,
         layout_options: {
-          columns: targetLayout === "grid" ? Math.max(2, value.columns || 2) : undefined
+          ...this._config?.layout_options,
+          columns: value.columns
         }
       };
       this._fireConfigChanged(newConfig);
     });
 
-    // Événement : Clic sur "+" pour ajouter un composant
-    this._addButton.addEventListener("click", () => {
-      const type = this._selector.value;
-      if (!type) return;
-
-      const templates = [...(this._config?.templates || [])];
-      
-      // Configuration initiale par défaut
-      let newCardConfig = { type: type };
-      if (type === "tile" || type === "button") {
-        newCardConfig.entity = "[[default_entity]]";
-        newCardConfig.name = "[[area_name]]";
-      }
-
-      templates.push(newCardConfig);
-      this._fireConfigChanged({ ...this._config, templates });
-      this._selector.value = ""; 
-    });
-
-    this._updateFormSchema();
-  }
-
-  _updateFormSchema() {
-    if (!this._formElement) return;
-
-    const currentLayout = this._config?.layout_type || "grid";
-
-    const schema = [
-      {
-        name: "layout_type",
-        label: "Type de mise en page",
-        type: "select",
-        options: [
-          ["grid", "Mode Grille (Grid)"],
-          ["horizontal-stack", "Mode Horizontal"],
-          ["vertical-stack", "Mode Vertical"]
-        ]
-      }
-    ];
-
-    if (currentLayout === "grid") {
-      schema.push({
-        name: "columns",
-        label: "Nombre de colonnes",
-        type: "integer",
-        default: 2,
-        valueMin: 2
-      });
-    }
-
-    this._formElement.schema = schema;
-    this._formElement.data = {
-      layout_type: currentLayout,
-      columns: Math.max(2, this._config?.layout_options?.columns || 2)
-    };
-
-    this._renderSubEditors();
-  }
-
-  // Génère dynamiquement l'éditeur visuel natif pour CHAQUE carte de la liste
-  async _renderSubEditors() {
-    const container = this.querySelector("#sub-editors-container");
-    if (!container) return;
-
-    const templates = this._config?.templates || [];
-    if (templates.length === 0) {
-      container.innerHTML = `
-        <div style="font-size: 0.9em; color: var(--secondary-text-color); font-style: italic; text-align: center; padding: 15px; border: 1px dashed var(--divider-color); border-radius: 6px;">
-          Aucun élément créé. Utilisez le menu d'ajout ci-dessous.
-        </div>`;
-      return;
-    }
-
-    container.innerHTML = "";
-    
-    // Charger l'outil de création d'éditeurs de Home Assistant
-    const helpers = await window.loadCardHelpers();
-
-    templates.forEach((tpl, index) => {
-      const cardWrapper = document.createElement("div");
-      cardWrapper.style = "border: 1px solid var(--divider-color); border-radius: 8px; background: var(--card-background-color); overflow: hidden; box-shadow: var(--ha-card-box-shadow, none);";
-      
-      // Barre de titre de l'élément avec bouton supprimer
-      const header = document.createElement("div");
-      header.style = "background: var(--secondary-background-color); padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--divider-color);";
-      header.innerHTML = `
-        <span style="font-weight: bold; font-size: 0.95em; color: var(--primary-text-color);">Élément #${index + 1} (${tpl.type})</span>
-        <button style="background: var(--error-color); color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em; font-weight: bold;">Supprimer</button>
-      `;
-      
-      header.querySelector("button").addEventListener("click", () => {
-        const newTemplates = [...templates];
-        newTemplates.splice(index, 1);
-        this._fireConfigChanged({ ...this._config, templates: newTemplates });
-      });
-      cardWrapper.appendChild(header);
-
-      // Panneau d'aide pour insérer visuellement les variables sans YAML
-      const helperBar = document.createElement("div");
-      helperBar.style = "padding: 8px 15px; background: var(--info-background-color, #e8f4fd); display: flex; flex-wrap: wrap; gap: 5px; align-items: center; border-bottom: 1px solid var(--divider-color);";
-      helperBar.innerHTML = `
-        <span style="font-size: 0.8em; color: var(--primary-text-color); font-weight: 500; margin-right: 5px;">Copier une variable :</span>
-        <button class="v-btn" data-v="[[area_name]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Nom Pièce</button>
-        <button class="v-btn" data-v="[[area_icon]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Icône</button>
-        <button class="v-btn" data-v="[[default_entity]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Lumière Auto</button>
-        <button class="v-btn" data-v="[[area_temp]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Température</button>
-      `;
-      
-      // Permet de copier rapidement dans le presse-papier pour le coller dans l'éditeur visuel juste en dessous
-      helperBar.querySelectorAll(".v-btn").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-          e.preventDefault();
-          navigator.clipboard.writeText(btn.getAttribute("data-v"));
-          alert(`Copié : ${btn.getAttribute("data-v")} ! Tu peux le coller (Ctrl+V) dans un champ ci-dessous.`);
-        });
-      });
-      cardWrapper.appendChild(helperBar);
-
-      // CRÉATION DE L'ÉDITEUR VISUEL NATIF DE LA CARTE (Le Graal !)
-      const editorElement = document.createElement("hui-card-element-editor");
-      editorElement.hass = this._hass;
-      editorElement.lovelace = { editMode: true };
-      // On passe la config actuelle de la sous-carte à son éditeur dédié
-      editorElement.value = tpl;
-      editorElement.style = "display: block; padding: 15px;";
-
-      // Écouter quand l'utilisateur change visuellement une option dans CE sous-éditeur
-      editorElement.addEventListener("config-changed", (ev) => {
-        ev.stopPropagation(); // Ne pas perturber l'éditeur parent
-        const updatedSubConfig = ev.detail.config;
-        
-        const newTemplates = [...templates];
-        newTemplates[index] = updatedSubConfig;
-        
-        this._fireConfigChanged({ ...this._config, templates: newTemplates });
-      });
-
-      cardWrapper.appendChild(editorElement);
-      container.appendChild(cardWrapper);
+    // Écouteur pour la configuration graphique du bouton
+    this._buttonFormElement.addEventListener("value-changed", (ev) => {
+      const value = ev.detail.value;
+      const newConfig = {
+        ...this._config,
+        gui_settings: {
+          nav_type: value.nav_type,
+          base_path: value.base_path
+        }
+      };
+      this._fireConfigChanged(newConfig);
     });
   }
 
   _fireConfigChanged(newConfig) {
-    this.dispatchEvent(new CustomEvent("config-changed", {
+    const event = new CustomEvent("config-changed", {
       detail: { config: newConfig },
       bubbles: true,
       composed: true,
-    }));
+    });
+    this.dispatchEvent(event);
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LE RENDU DE LA CARTE PRINCIPALE
+// 2. LA CARTE PRINCIPALE (ALL AREAS DISPLAY)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -245,13 +159,10 @@ class AllAreasDisplay extends HTMLElement {
       type: "custom:all-areas-display",
       layout_type: "grid",
       layout_options: { columns: 2 },
-      templates: [
-        {
-          type: "tile",
-          entity: "[[default_entity]]",
-          name: "[[area_name]]"
-        }
-      ]
+      gui_settings: {
+        nav_type: "popup",
+        base_path: ""
+      }
     };
   }
 
@@ -260,88 +171,131 @@ class AllAreasDisplay extends HTMLElement {
     if (!this._config) return;
 
     if (!this.content) {
-      this.innerHTML = `<div id="root"></div>`;
-      this.content = this.querySelector('#root');
-      this._buildCards();
-    } else if (this._layoutElement) {
-      this._layoutElement.hass = hass;
+      this.innerHTML = `<div id="card-container"></div>`;
+      this.content = this.querySelector('#card-container');
     }
+
+    if (this._initialized) {
+      if (this._layoutElement) this._layoutElement.hass = hass;
+      return;
+    }
+    this._initialized = true;
+
+    this._buildCards();
   }
 
   async _buildCards() {
     const config = this._config;
     const hass = this._hass;
     const areas = Object.values(hass.areas || {});
-    const templates = config.templates || [];
 
-    const mainLayoutConfig = {
+    // Détermination de la structure d'alignement demandée
+    const layoutConfig = {
       type: config.layout_type || 'grid',
       cards: []
     };
     
-    if (mainLayoutConfig.type === 'grid') {
-      mainLayoutConfig.columns = Math.max(2, config.layout_options?.columns || 2);
+    // N'ajouter les colonnes que si on est en mode grid standard
+    if (layoutConfig.type === 'grid') {
+      layoutConfig.columns = config.layout_options?.columns || 2;
+      layoutConfig.square = config.layout_options?.square || false;
     }
 
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name;
-      const areaIcon = area.icon || "mdi:home-outline";
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
+      const areaIcon = area.icon || "mdi:home-outline";
 
-      let defaultEntity = "sun.sun";
-      const matchCard = Object.values(hass.states).find(s => 
-        (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.')) && 
-        hass.entities[s.entity_id]?.area_id === areaId
+      // 🔍 1. Trouver une entité de contrôle par défaut (Lumière ou Switch)
+      let defaultEntity = "sun.sun"; 
+      const lightEntity = Object.values(hass.states).find(state => 
+        state.entity_id.startsWith('light.') && 
+        hass.entities[state.entity_id]?.area_id === areaId
       );
-      if (matchCard) defaultEntity = matchCard.entity_id;
+      if (lightEntity) {
+        defaultEntity = lightEntity.entity_id;
+      } else {
+        const switchEntity = Object.values(hass.states).find(state => 
+          (state.entity_id.startsWith('switch.') || state.entity_id.startsWith('input_boolean.')) && 
+          hass.entities[state.entity_id]?.area_id === areaId
+        );
+        if (switchEntity) defaultEntity = switchEntity.entity_id;
+      }
 
+      // 🌡️ 2. Récupérer la température automatique
       let areaTemp = "N/A";
-      const tSensor = Object.values(hass.states).find(s => 
-        s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
-        hass.entities[s.entity_id]?.area_id === areaId
+      const tempEntity = Object.values(hass.states).find(state => 
+        state.entity_id.startsWith('sensor.') && 
+        (state.entity_id.includes('temperature') || state.attributes.device_class === 'temperature') && 
+        hass.entities[state.entity_id]?.area_id === areaId
       );
-      if (tSensor) areaTemp = tSensor.state + (tSensor.attributes.unit_of_measurement || '°C');
+      if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
 
+      // 💧 3. Récupérer l'humidité automatique
       let areaHumidity = "N/A";
-      const hSensor = Object.values(hass.states).find(s => 
-        s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'humidity' && 
-        hass.entities[s.entity_id]?.area_id === areaId
+      const humEntity = Object.values(hass.states).find(state => 
+        state.entity_id.startsWith('sensor.') && 
+        (state.entity_id.includes('humidity') || state.attributes.device_class === 'humidity') && 
+        hass.entities[state.entity_id]?.area_id === areaId
       );
-      if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
+      if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
 
-      const localStack = {
-        type: "vertical-stack",
-        cards: []
+      // 🗺️ 4. Calcul de l'action de navigation basée sur l'éditeur visuel GUI
+      const navType = config.gui_settings?.nav_type || "popup";
+      const basePath = config.gui_settings?.base_path || "";
+      let targetNavigationPath = `#${areaSlug}`; // Défaut type popup hash
+
+      if (navType === "path") {
+        targetNavigationPath = basePath ? `${basePath}${areaSlug}` : `/lovelace/${areaSlug}`;
+      }
+
+      // 🏗️ 5. Construction de la carte finale pour cette pièce
+      let templateToUse = null;
+
+      if (config.button_template) {
+        // Mode Expert : L'utilisateur a fourni son propre template de carte en YAML
+        templateToUse = config.button_template;
+      } else {
+        // Mode GUI : On génère une carte de tuile propre (Tile Card standard) native de HA
+        templateToUse = {
+          type: "tile",
+          entity: defaultEntity,
+          name: areaName,
+          icon: areaIcon,
+          hide_state: false,
+          state_content: ["state"],
+          tap_action: {
+            action: "navigate",
+            navigation_path: "[[navigation_path]]"
+          }
+        };
+      }
+
+      // 📝 6. Remplacement des variables dans la configuration de la sous-carte
+      const replaceVariables = (obj) => {
+        let str = JSON.stringify(obj);
+        str = str.replaceAll('[[area_id]]', areaId);
+        str = str.replaceAll('[[area_name]]', areaName);
+        str = str.replaceAll('[[area_icon]]', areaIcon);
+        str = str.replaceAll('[[area_slug]]', areaSlug);
+        str = str.replaceAll('[[area_temp]]', areaTemp);
+        str = str.replaceAll('[[area_humidity]]', areaHumidity);
+        str = str.replaceAll('[[default_entity]]', defaultEntity);
+        str = str.replaceAll('[[navigation_path]]', targetNavigationPath);
+        return JSON.parse(str);
       };
 
-      const bindVariables = (tpl) => {
-        let raw = JSON.stringify(tpl);
-        raw = raw.replaceAll('[[area_id]]', areaId)
-                 .replaceAll('[[area_name]]', areaName)
-                 .replaceAll('[[area_icon]]', areaIcon)
-                 .replaceAll('[[area_slug]]', areaSlug)
-                 .replaceAll('[[area_temp]]', areaTemp)
-                 .replaceAll('[[area_humidity]]', areaHumidity)
-                 .replaceAll('[[default_entity]]', defaultEntity);
-        return JSON.parse(raw);
-      };
-
-      templates.forEach(tpl => {
-        localStack.cards.push(bindVariables(tpl));
-      });
-
-      if (localStack.cards.length > 0) {
-        if (localStack.cards.length === 1) {
-          mainLayoutConfig.cards.push(localStack.cards[0]);
-        } else {
-          mainLayoutConfig.cards.push(localStack);
-        }
+      layoutConfig.cards.push(replaceVariables(templateToUse));
+      
+      // Ajouter une popup si elle est déclarée manuellement en YAML
+      if (config.popup_template) {
+        layoutConfig.cards.push(replaceVariables(config.popup_template));
       }
     });
 
     const helpers = await window.loadCardHelpers();
-    const element = helpers.createCardElement(mainLayoutConfig);
+    const element = helpers.createCardElement(layoutConfig);
     element.hass = hass;
 
     this.content.innerHTML = '';
@@ -351,24 +305,25 @@ class AllAreasDisplay extends HTMLElement {
 
   setConfig(config) {
     this._config = config;
-    if (this.content) {
-      this._buildCards();
-    }
   }
 
   getCardSize() {
     return 3;
   }
 }
+
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement catalogue
+
+// ==========================================
+// 3. ENREGISTREMENT CATALOGUE
+// ==========================================
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
-    name: "All Areas Display",
+    name: "All areas display",
     preview: true,
-    description: "Générateur automatique par pièce avec support multi-cartes empilées."
+    description: "Générateur dynamique de cartes par pièce avec gestion d'alignements fluides."
   });
 }
