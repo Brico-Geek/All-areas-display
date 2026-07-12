@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR CONFIGURABLE (SANS BLOCAGE)
+// 1. L'ÉDITEUR AVEC APPEL DU DIALOGUE NATIF
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -10,12 +10,11 @@ class AllAreasDisplayEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._formElement) this._formElement.hass = hass;
-    if (this._cardEditor) this._cardEditor.hass = hass;
   }
 
   async _render() {
     if (this.querySelector("#layout-form")) {
-      this._updateEditorInstance();
+      this._updatePreviewState();
       return;
     }
 
@@ -30,15 +29,31 @@ class AllAreasDisplayEditor extends HTMLElement {
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
-        <!-- 2. Zone Éditeur de la Carte Modèle -->
+        <!-- 2. Zone de Sélection de la carte via l'assistant officiel -->
         <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Sélectionner et configurer la carte</h3>
+          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Carte modèle</h3>
           <p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Choisissez n'importe quelle carte disponible. Elle sera automatiquement déclinée pour chaque pièce.
+            Ouvrez le catalogue de Home Assistant pour choisir et configurer n'importe quelle carte (bouton, tuile, carte personnalisée...).
           </p>
           
-          <div id="editor-container" style="min-height: 200px; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; background: var(--card-background-color);">
-            <!-- Le sélecteur ou l'éditeur s'injecte ici -->
+          <button id="open-picker-btn" style="
+            width: 100%;
+            background: var(--primary-color);
+            color: var(--text-primary-color, white);
+            border: none;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1em;
+            cursor: pointer;
+            box-shadow: var(--ha-card-box-shadow, none);
+            transition: background 0.2s;
+          " onmouseover="this.style.background='var(--accent-color)'" onmouseout="this.style.background='var(--primary-color)'">
+            🔍 CHOISIR / MODIFIER LA CARTE MODÈLE
+          </button>
+
+          <div id="current-template-info" style="margin-top: 12px; font-size: 0.9em; color: var(--secondary-text-color); font-style: italic;">
+            Aucune carte sélectionnée.
           </div>
         </div>
 
@@ -47,7 +62,13 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     this._formElement = this.querySelector("#layout-form");
     this._setupLayoutForm();
-    this._attachCardEditor();
+
+    // Au clic, on déclenche l'assistant officiel de sélection de carte de Home Assistant
+    this.querySelector("#open-picker-btn").addEventListener("click", () => {
+      this._openNativeCardPicker();
+    });
+
+    this._updatePreviewState();
   }
 
   _setupLayoutForm() {
@@ -95,38 +116,52 @@ class AllAreasDisplayEditor extends HTMLElement {
     });
   }
 
-  async _attachCardEditor() {
-    const container = this.querySelector("#editor-container");
-    if (!container) return;
+  // Appele l'assistant de carte officiel de HA au premier plan
+  _openNativeCardPicker() {
+    const event = new CustomEvent("show-dialog", {
+      bubbles: true,
+      composed: true,
+      detail: {
+        dialogTag: "hui-dialog-edit-card",
+        dialogImport: () => import("/frontend_latest/hui-dialog-edit-card.js"),
+        dialogParams: {
+          lovelaceConfig: { cards: [] },
+          // Si on a déjà choisi une carte, on la charge pour la modifier, sinon le sélecteur complet s'ouvre
+          cardConfig: this._config?.template_card || undefined,
+          saveCard: (newCardConfig) => {
+            // Nettoyage rapide des variables injectées par HA lors de la configuration
+            if (newCardConfig) {
+              newCardConfig.name = "[[area_name]]";
+              newCardConfig.icon = "[[area_icon]]";
+              if (newCardConfig.type === "glance" || newCardConfig.type === "entities") {
+                newCardConfig.entities = ["[[default_entity]]"];
+              } else {
+                newCardConfig.entity = "[[default_entity]]";
+              }
+            }
 
-    const cardEditor = document.createElement("hui-card-element-editor");
-    cardEditor.hass = this._hass;
-    
-    // IMPORTANT : Si aucune carte n'est enregistrée dans la config, on ne lui donne RIEN (undefined).
-    // C'est ce qui force légitimement Home Assistant à afficher son écran de sélection de cartes (le Card Picker).
-    if (this._config && this._config.template_card && Object.keys(this._config.template_card).length > 0) {
-      cardEditor.value = this._config.template_card;
-    }
-
-    cardEditor.addEventListener("config-changed", (ev) => {
-      ev.stopPropagation();
-      
-      this._config = {
-        ...this._config,
-        template_card: ev.detail.config
-      };
-
-      this._fireConfigChanged();
+            this._config = {
+              ...this._config,
+              template_card: newCardConfig
+            };
+            this._updatePreviewState();
+            this._fireConfigChanged();
+          }
+        }
+      }
     });
-
-    container.innerHTML = "";
-    container.appendChild(cardEditor);
-    this._cardEditor = cardEditor;
+    this.dispatchEvent(event);
   }
 
-  _updateEditorInstance() {
-    if (this._cardEditor && this._hass) {
-      this._cardEditor.hass = this._hass;
+  _updatePreviewState() {
+    const info = this.querySelector("#current-template-info");
+    if (!info) return;
+    if (this._config?.template_card?.type) {
+      info.textContent = `Type sélectionné : ${this._config.template_card.type}`;
+      info.style.color = "var(--success-color, green)";
+    } else {
+      info.textContent = "Aucune carte sélectionnée. Cliquez sur le bouton ci-dessus.";
+      info.style.color = "var(--secondary-text-color)";
     }
   }
 
@@ -150,7 +185,6 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   static getStubConfig() {
-    // On nettoie le stub de démarrage pour éviter qu'une carte bouton ne se verrouille d'office
     return {
       type: "custom:all-areas-display",
       layout_type: "grid",
@@ -167,7 +201,7 @@ class AllAreasDisplay extends HTMLElement {
       this.content = this.querySelector('#root');
       this._buildCards();
     } else {
-      this._buildCards(); // On reconstruit pour mettre à jour l'affichage dynamique à droite en direct
+      this._buildCards();
     }
   }
 
@@ -178,11 +212,11 @@ class AllAreasDisplay extends HTMLElement {
     const hass = this._hass;
     const template = config.template_card;
 
-    // Si aucune carte n'est encore sélectionnée, on affiche un message d'attente à droite plutôt qu'un écran blanc bugué
     if (!template || Object.keys(template).length === 0) {
       this.content.innerHTML = `
-        <div style="padding: 20px; text-align: center; color: var(--secondary-text-color); border: 2px dashed var(--divider-color); border-radius: 8px; margin: 10px;">
-          En attente de la sélection d'une carte dans la colonne de gauche...
+        <div style="padding: 30px; text-align: center; color: var(--secondary-text-color); border: 2px dashed var(--divider-color); border-radius: 12px; margin: 10px;">
+          <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 8px;">Aucune carte modèle</div>
+          Utilisez le bouton dans la colonne de gauche pour ouvrir l'assistant officiel et générer vos pièces.
         </div>
       `;
       return;
@@ -269,6 +303,6 @@ if (!window.customCards.some(c => c.type === 'all-areas-display')) {
     type: "all-areas-display",
     name: "All Areas Display",
     preview: true,
-    description: "Générateur multi-zones avec intégration du sélecteur universel."
+    description: "Multi-générateur utilisant l'assistant officiel de cartes."
   });
 }
