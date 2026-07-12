@@ -1,12 +1,35 @@
 // ==========================================
-// 1. LA CARTE PRINCIPALE (ALL AREAS DISPLAY)
+// 1. L'ÉDITEUR (VERSION STRICTE CODE / YAML)
+// ==========================================
+class AllAreasDisplayEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+  }
+
+  // Ce bloc indique à Home Assistant de ne pas essayer de générer 
+  // d'interface visuelle (ce qui évitera l'apparition des {} parasites)
+  getConfigForm() {
+    return {
+      schema: [],
+    };
+  }
+
+  // On laisse l'élément graphique vide pour forcer l'affichage du code YAML
+  focus() {}
+}
+customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
+
+
+// ==========================================
+// 2. LA CARTE PRINCIPALE
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
-  
-  // Cette ligne force Home Assistant à ouvrir DIRECTEMENT l'éditeur de code YAML
-  // sans passer par l'interface visuelle qui casse tout avec des {}
   static getConfigElement() {
-    return document.createElement("ha-card-editor");
+    return document.createElement("all-areas-display-editor");
   }
 
   static getStubConfig() {
@@ -25,8 +48,8 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.card) {
-      throw new Error("Vous devez définir une carte cible dans le paramètre 'card'.");
+    if (!config || !config.card) {
+      throw new Error("Vous devez spécifier un modèle de carte dans 'card:'");
     }
     this._config = config;
   }
@@ -47,12 +70,11 @@ class AllAreasDisplay extends HTMLElement {
     const config = this._config;
     const hass = this._hass;
     
-    // Attendre que les pièces soient chargées par Home Assistant
     if (!hass.areas) return;
     
     let areas = Object.values(hass.areas);
     
-    // 1. Filtrer les exclusions (insensible à la casse)
+    // 1. Filtrage des exclusions
     const excludeList = (config.exclude || []).map(item => String(item).toLowerCase());
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
@@ -65,20 +87,19 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
-    // 2. Préparer la structure du conteneur (grid par défaut)
+    // 2. Configuration de la structure globale (Grid par défaut)
     const layoutConfig = {
       ...(config.layout || { type: "grid", columns: 2 }),
       cards: []
     };
 
-    // 3. Boucler sur les pièces et injecter les variables de manière brute
+    // 3. Remplacement des tags et duplication du modèle de carte
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name || areaId;
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
-      // Fonction de remplacement récursive pour traiter tout le bloc YAML de la carte
       const processCard = (obj) => {
         let str = JSON.stringify(obj);
         str = str.replaceAll('this.area.id', areaId);
@@ -91,18 +112,17 @@ class AllAreasDisplay extends HTMLElement {
       try {
         layoutConfig.cards.push(processCard(config.card));
       } catch (e) {
-        console.error("Erreur d'injection dans la carte :", e);
+        console.error("Erreur injection variables :", e);
       }
     });
 
-    // 4. Génération et rendu via l'élément officiel de Home Assistant
+    // 4. Rendu de la grille/pile via l'élément hui-element standard
     if (!this._layoutElement) {
       this._layoutElement = document.createElement("hui-element");
       this.content.innerHTML = '';
       this.content.appendChild(this._layoutElement);
     }
     
-    // On met à jour la configuration globale du conteneur de cartes
     this._layoutElement.setConfig(layoutConfig);
     this._layoutElement.hass = hass;
   }
@@ -112,13 +132,13 @@ class AllAreasDisplay extends HTMLElement {
 
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement dans le catalogue des cartes de Home Assistant
+// Enregistrement dans le catalogue
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
     name: "All areas display",
     preview: true,
-    description: "Génère dynamiquement des cartes pour chaque pièce (façon auto-entities)."
+    description: "Affiche des cartes dynamiques par pièce en pur YAML."
   });
 }
