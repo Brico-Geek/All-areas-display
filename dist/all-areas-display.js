@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR HYBRIDE CORRIGÉ (PERSISTANCE DU YAML)
+// 1. L'ÉDITEUR HYBRIDE (INTERFACE SIMPLE + YAML)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -9,16 +9,11 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._layoutFormElement) {
-      this._layoutFormElement.hass = hass;
-    }
-    if (this._yamlEditor) {
-      this._yamlEditor.hass = hass;
-    }
+    if (this._layoutFormElement) this._layoutFormElement.hass = hass;
+    if (this._yamlEditor) this._yamlEditor.hass = hass;
   }
 
   _render() {
-    // Si l'élément est déjà construit, on met juste à jour les valeurs pour éviter les resets globaux
     if (this._layoutFormElement) {
       this._updateFormValues();
       return;
@@ -26,25 +21,20 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
-        
         <h3 style="margin: 0; color: var(--primary-color);">1. Structure de l'affichage</h3>
         <ha-form id="layout-form"></ha-form>
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
         <h3 style="margin: 0; color: var(--primary-color);">2. Pièces à exclure (Bannir)</h3>
-        <div style="font-size: 0.85em; color: var(--secondary-text-color); margin-bottom: 5px;">
-          Entrez les IDs ou les noms des pièces à masquer (ex: garage, cellier) :
-        </div>
         <ha-textfield id="exclude-input" style="width: 100%;" placeholder="garage, couloir, exterieur"></ha-textfield>
 
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
 
         <h3 style="margin: 0; color: var(--primary-color);">3. Modèle de la carte (YAML)</h3>
         <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Laissez les champs vides pour le comportement par défaut, ou utilisez <code>this.area.name</code>, <code>this.area.temperature</code>, etc.
+          Utilisez <code>this.area.name</code>, <code>this.area.temperature</code>, etc. Ou laissez vide (ex: <code>name: ""</code>) pour l'auto-remplissage.
         </p>
-
         <div id="yaml-editor-container"></div>
       </div>
     `;
@@ -53,7 +43,6 @@ class AllAreasDisplayEditor extends HTMLElement {
     const container = this.querySelector("#yaml-editor-container");
     const excludeInput = this.querySelector("#exclude-input");
 
-    // Gestion du champ d'exclusion
     excludeInput.value = this._config.exclude_areas ? this._config.exclude_areas.join(', ') : '';
     excludeInput.addEventListener("change", (ev) => {
       const list = ev.target.value.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
@@ -61,7 +50,6 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._fireConfigChanged();
     });
 
-    // Schéma de configuration de la mise en page
     const layoutSchema = [
       {
         name: "layout_type",
@@ -79,64 +67,36 @@ class AllAreasDisplayEditor extends HTMLElement {
       {
         name: "columns",
         label: "Nombre de colonnes (Mode Grille)",
-        selector: {
-          number: { min: 1, max: 12, mode: "box" }
-        }
+        selector: { number: { min: 1, max: 12, mode: "box" } }
       }
     ];
 
     this._layoutFormElement.schema = layoutSchema;
     this._updateFormValues();
 
-    // Écouteur du formulaire visuel
     this._layoutFormElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
       this._config = {
         ...this._config,
         layout_type: value.layout_type || "grid",
-        layout_options: {
-          ...this._config.layout_options,
-          columns: value.columns || 2
-        }
+        layout_options: { columns: value.columns || 2 }
       };
       this._fireConfigChanged();
     });
 
-    // Initialisation robuste de l'éditeur de code YAML
     this._yamlEditor = document.createElement("ha-code-editor");
     this._yamlEditor.mode = "yaml";
     
-    // On extrait le template existant ou on applique une structure de départ propre
     const cardTemplate = this._config.card_template || { type: "tile" };
-    
-    // Conversion en YAML propre via la librairie de Home Assistant ou fallback JSON
-    if (window.jsyaml) {
-      this._yamlEditor.value = window.jsyaml.dump(cardTemplate);
-    } else {
-      this._yamlEditor.value = JSON.stringify(cardTemplate, null, 2);
-    }
+    this._yamlEditor.value = window.jsyaml ? window.jsyaml.dump(cardTemplate) : JSON.stringify(cardTemplate, null, 2);
 
-    // Écouteur de modifications sur l'éditeur de code
     this._yamlEditor.addEventListener("value-changed", (ev) => {
-      ev.stopPropagation(); // Évite les boucles infinies d'événements HA
+      ev.stopPropagation();
       try {
-        let parsedCard;
-        if (window.jsyaml) {
-          parsedCard = window.jsyaml.load(ev.detail.value);
-        } else {
-          parsedCard = JSON.parse(ev.detail.value);
-        }
-        
-        // On met à jour la configuration locale de l'éditeur
-        this._config = {
-          ...this._config,
-          card_template: parsedCard
-        };
-        
+        const parsedCard = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
+        this._config = { ...this._config, card_template: parsedCard };
         this._fireConfigChanged();
-      } catch (err) {
-        // En cours de saisie, le YAML peut être invalide, on ignore pour éviter le crash
-      }
+      } catch (err) {}
     });
 
     container.appendChild(this._yamlEditor);
@@ -162,7 +122,7 @@ customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LA CARTE PRINCIPALE (MOTEUR DE DYNAMISATION)
+// 2. LA CARTE PRINCIPALE (MOTEUR FIXÉ)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -175,9 +135,7 @@ class AllAreasDisplay extends HTMLElement {
       layout_type: "grid",
       layout_options: { columns: 2 },
       exclude_areas: [],
-      card_template: {
-        type: "tile"
-      }
+      card_template: { type: "tile" }
     };
   }
 
@@ -210,7 +168,6 @@ class AllAreasDisplay extends HTMLElement {
     let areas = Object.values(hass.areas || {});
     const excludeList = config.exclude_areas || [];
 
-    // Filtrer les pièces exclues
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
       const nameMatch = area.name ? excludeList.includes(area.name.toLowerCase()) : false;
@@ -218,7 +175,7 @@ class AllAreasDisplay extends HTMLElement {
     });
 
     if (areas.length === 0) {
-      this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce à afficher (ou toutes bannies).</ha-alert>`;
+      this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce à afficher.</ha-alert>`;
       return;
     }
 
@@ -240,7 +197,6 @@ class AllAreasDisplay extends HTMLElement {
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
-      // Entité par défaut
       let defaultEntity = "sun.sun"; 
       const lightEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('light.') && hass.entities[state.entity_id]?.area_id === areaId
@@ -255,7 +211,6 @@ class AllAreasDisplay extends HTMLElement {
         if (switchEntity) defaultEntity = switchEntity.entity_id;
       }
 
-      // Capteurs Température & Humidité
       let areaTemp = "N/A";
       const tempEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
@@ -282,14 +237,18 @@ class AllAreasDisplay extends HTMLElement {
         humidity: areaHumidity
       };
 
-      // Injection des variables et fallbacks intelligents
       const processCard = (obj) => {
         let copy = JSON.parse(JSON.stringify(obj));
 
-        if (!copy.hasOwnProperty('entity') || copy.entity === "") copy.entity = areaData.entity;
-        if (!copy.hasOwnProperty('name') || copy.name === "") copy.name = areaData.name;
-        if (!copy.hasOwnProperty('icon') || copy.icon === "") copy.icon = areaData.icon;
+        // FIX : On n'injecte les fallbacks globaux QUE si l'utilisateur l'a demandé via une chaîne vide ""
+        // OU si c'est une carte de type tile/button standard pour éviter de casser le schéma des cartes customs.
+        const isStandard = copy.type === 'tile' || copy.type === 'button';
+        
+        if ((isStandard && !copy.hasOwnProperty('entity')) || copy.entity === "") copy.entity = areaData.entity;
+        if ((isStandard && !copy.hasOwnProperty('name')) || copy.name === "") copy.name = areaData.name;
+        if ((isStandard && !copy.hasOwnProperty('icon')) || copy.icon === "") copy.icon = areaData.icon;
 
+        // Remplacement textuel global de "this.area.xxx"
         let str = JSON.stringify(copy);
         str = str.replaceAll('this.area.id', areaData.id);
         str = str.replaceAll('this.area.name', areaData.name);
@@ -322,13 +281,10 @@ class AllAreasDisplay extends HTMLElement {
     }
   }
 
-  getCardSize() {
-    return 4;
-  }
+  getCardSize() { return 4; }
 }
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement catalogue Lovelace
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
