@@ -15,6 +15,48 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
+  // --- PETIT MOTEUR DE RENDU YAML LOCAL TRÈS ROBUSTE ---
+  // Il remplace jsyaml pour le dump et gère parfaitement l'indentation, les objets et les listes (-)
+  _stringifyYaml(obj, depth = 0) {
+    const indent = "  ".repeat(depth);
+    
+    if (obj === null || obj === undefined) return "";
+    
+    if (Array.isArray(obj)) {
+      if (obj.length === 0) return " []";
+      return "\n" + obj.map(item => {
+        if (typeof item === 'object' && item !== null) {
+          // Pour un objet dans une liste, on indente le premier champ derrière le tiret
+          const entries = Object.entries(item);
+          if (entries.length === 0) return `${indent}- {}`;
+          const first = `${indent}- ${entries[0][0]}:${this._stringifyYaml(entries[0][1], depth + 1)}`;
+          const rest = entries.slice(1).map(([k, v]) => `${indent}  ${k}:${this._stringifyYaml(v, depth + 1)}`).join("\n");
+          return rest ? `${first}\n${rest}` : first;
+        }
+        return `${indent}- ${item}`;
+      }).join("\n");
+    }
+    
+    if (typeof obj === 'object') {
+      const entries = Object.entries(obj);
+      if (entries.length === 0) return " {}";
+      const content = entries.map(([k, v]) => {
+        const valueStr = this._stringifyYaml(v, depth + 1);
+        // Si la valeur commence par un retour à la ligne (objet/tableau imbriqué), pas besoin d'espace après le ":"
+        const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
+        return `${indent}${k}:${separator}${valueStr}`;
+      }).join("\n");
+      return depth === 0 ? content : "\n" + content;
+    }
+    
+    // Protection pour les chaînes de caractères complexes ou vides
+    const str = String(obj);
+    if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
+      return `"${str.replace(/"/g, '\\"')}"`;
+    }
+    return str;
+  }
+
   async _render() {
     if (this._initialized) {
       this._updateUiFields();
@@ -37,13 +79,11 @@ class AllAreasDisplayEditor extends HTMLElement {
             </select>
           </div>
 
-          <!-- Options dynamiques pour l'Auto (Largeur de carte) -->
           <div id="auto-options" style="display: none; align-items: center; gap: 8px; margin-top: 6px;">
             <label style="color: var(--primary-text-color); font-size: 0.9em;">Largeur cible des cartes :</label>
             <input id="auto-width" type="text" placeholder="150px" style="width: 70px; padding: 6px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);" />
           </div>
 
-          <!-- Options dynamiques pour la Grille -->
           <div id="grid-options" style="display: none; gap: 12px; align-items: center; margin-top: 6px;">
             <div style="display: flex; align-items: center; gap: 6px;">
               <label style="color: var(--primary-text-color); font-size: 0.9em;">Colonnes (Min 2) :</label>
@@ -51,7 +91,6 @@ class AllAreasDisplayEditor extends HTMLElement {
             </div>
           </div>
 
-          <!-- Option Carré -->
           <div id="square-option-container" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
             <input id="layout-square" type="checkbox" style="cursor: pointer;" />
             <label for="layout-square" style="color: var(--primary-text-color); font-size: 0.9em; cursor: pointer;">Afficher les cartes en carré</label>
@@ -88,7 +127,6 @@ class AllAreasDisplayEditor extends HTMLElement {
       </div>
     `;
 
-    // Événements d'interaction de l'interface
     this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutUiChange());
     this.querySelector("#auto-width").addEventListener("change", () => this._handleLayoutUiChange());
@@ -101,49 +139,37 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._cardYamlEditor.autofocus = false;
     yamlContainer.appendChild(this._cardYamlEditor);
 
-    // Écoute des modifications en temps réel dans notre sous-éditeur
     this._cardYamlEditor.addEventListener("value-changed", (e) => {
-      e.stopPropagation(); // Évite les conflits d'événements
+      e.stopPropagation();
       this._handleYamlChange(e.detail.value);
     });
 
-    // Attente du chargement complet pour faire le premier dump propre
-    setTimeout(() => {
-      this._forceYamlDumpInEditor();
-    }, 200);
+    // Rendu immédiat et propre via notre stringifier autonome
+    this._forceYamlDumpInEditor();
 
     this._updateUiFields();
   }
 
-  // Utilise l'utilitaire natif de Home Assistant pour convertir proprement l'objet JS en vrai YAML textuel
+  // Injecte la configuration sous forme de vrai YAML indenté
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-
-    // On récupère le parseur officiel chargé par Home Assistant au lieu de notre bricolage
-    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
-
-    if (hassYaml && typeof hassYaml.dump === "function") {
-      this._cardYamlEditor.value = hassYaml.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
-    } else {
-      // Si jsyaml n'est pas encore dispo globalement, on utilise JSON.stringify temporairement pour ne rien perdre
-      // La zone de texte se mettra à jour proprement dès le premier événement
-      this._cardYamlEditor.value = JSON.stringify(currentCardConfig, null, 2);
-    }
+    
+    // On utilise notre méthode interne récursive : zéro dépendance, zéro corruption
+    this._cardYamlEditor.value = this._stringifyYaml(currentCardConfig).trim();
   }
 
-  // Parse le YAML tapé par l'utilisateur pour le renvoyer à l'éditeur principal HA
   _handleYamlChange(rawText) {
+    // Le parseur natif de HA fonctionne bien pour lire (load), c'est l'écriture (dump) qui posait problème.
     const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
     if (!hassYaml || typeof hassYaml.load !== "function") return;
 
     try {
       const parsedCard = hassYaml.load(rawText);
       if (parsedCard && typeof parsedCard === 'object') {
-        // Met à jour l'objet de configuration interne sans toucher au texte brut en cours de frappe
         this._config = { ...this._config, card: parsedCard };
         
-        // Déclenche la synchronisation avec le fichier de configuration principal de Lovelace
+        // Notification immédiate au dashboard Lovelace
         this.dispatchEvent(new CustomEvent("config-changed", {
           detail: { config: this._config },
           bubbles: true,
@@ -151,7 +177,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         }));
       }
     } catch (err) {
-      // On ignore l'erreur pendant la saisie (ex: tiret orphelin en cours d'écriture)
+      // Ignoré pendant la frappe utilisateur
     }
   }
 
