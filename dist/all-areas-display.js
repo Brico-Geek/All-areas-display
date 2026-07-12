@@ -14,7 +14,6 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   async _render() {
-    // Si le formulaire principal est déjà rendu, on évite de tout reconstruire inutilement
     if (this.querySelector("#layout-form")) {
       this._updateEditorHass();
       return;
@@ -61,7 +60,6 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._setupLayoutForm();
     await this._attachCardEditor();
 
-    // Gestion du clic pour changer le mode d'édition de la sous-carte
     this.querySelector("#toggle-editor-mode").addEventListener("click", () => {
       if (this._cardEditor) {
         this._cardEditor.toggleMode();
@@ -118,11 +116,9 @@ class AllAreasDisplayEditor extends HTMLElement {
     const container = this.querySelector("#editor-container");
     if (!container) return;
 
-    // L'élément officiel de HA qui gère à la fois l'UI visuelle d'une carte et sa bascule de mode
     const cardEditor = document.createElement("hui-card-element-editor");
     cardEditor.hass = this._hass;
     
-    // Valeur initiale si aucune configuration n'existe encore
     cardEditor.value = this._config?.template_card || { 
       type: "button", 
       name: "[[area_name]]", 
@@ -161,7 +157,7 @@ customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES
+// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES (CORRIGÉ)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -183,6 +179,7 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   set hass(hass) {
+    const oldHass = this._hass;
     this._hass = hass;
     if (!this._config) return;
 
@@ -190,8 +187,9 @@ class AllAreasDisplay extends HTMLElement {
       this.innerHTML = `<div id="root"></div>`;
       this.content = this.querySelector('#root');
       this._buildCards();
-    } else {
-      this._buildCards();
+    } else if (this._layoutElement) {
+      // TRÈS IMPORTANT : On transmet le hass à l'élément de mise en page pour qu'il le propage à ses enfants
+      this._layoutElement.hass = hass;
     }
   }
 
@@ -220,7 +218,6 @@ class AllAreasDisplay extends HTMLElement {
     areas.forEach(area => {
       const areaId = area.area_id;
 
-      // Recherche automatique d'une entité actionnable par pièce
       let defaultEntity = null;
       const matchCard = Object.values(hass.states).find(s => 
         (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.') || s.entity_id.startsWith('input_boolean.')) && 
@@ -234,7 +231,6 @@ class AllAreasDisplay extends HTMLElement {
       const areaIcon = area.icon || "mdi:home-outline";
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
 
-      // Capteurs additionnels si disponibles
       let areaTemp = "N/A";
       const tSensor = Object.values(hass.states).find(s => 
         s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
@@ -249,7 +245,6 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
 
-      // Application des variables dynamiques sur la carte
       let raw = JSON.stringify(template);
       raw = raw.replaceAll('[[area_id]]', areaId)
                .replaceAll('[[area_name]]', areaName)
@@ -265,10 +260,20 @@ class AllAreasDisplay extends HTMLElement {
     try {
       const helpers = await window.loadCardHelpers();
       const element = helpers.createCardElement(mainLayoutConfig);
+      
+      // Assigner le hass avant l'injection
       element.hass = hass;
 
       this.content.innerHTML = '';
       this.content.appendChild(element);
+      this._layoutElement = element;
+
+      // LA CORRECTION : Laisser un tick au navigateur pour monter l'élément, puis ré-injecter hass
+      // Cela force le déclenchement de la méthode customElement connectedCallback des sous-cartes
+      await new Promise(r => setTimeout(r, 0));
+      if (this._layoutElement) {
+        this._layoutElement.hass = this._hass;
+      }
     } catch (err) {
       this.content.innerHTML = `<p style="color:red; padding:10px;">Erreur d'affichage : ${err.message}</p>`;
     }
