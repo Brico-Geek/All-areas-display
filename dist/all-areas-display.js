@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR CONFIGURABLE (GAUCHE / DROITE)
+// 1. L'ÉDITEUR 100% VISUEL (SANS CODE)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -10,53 +10,67 @@ class AllAreasDisplayEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._formElement) this._formElement.hass = hass;
-    if (this._cardEditor) this._cardEditor.hass = hass;
   }
 
-  async _render() {
-    if (this.querySelector("#layout-form")) {
-      this._updateEditorInstance();
+  _render() {
+    if (this.querySelector("#config-form")) {
+      this._updateFormSchema();
       return;
     }
 
-    // Structure en deux colonnes : Formulaire + Sélecteur/Éditeur de carte à gauche
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
-        
-        <!-- 1. Disposition Globale -->
-        <div>
-          <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1em;">1. Disposition globale</h3>
-          <ha-form id="layout-form"></ha-form>
-        </div>
-        
-        <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
-        
-        <!-- 2. Zone Éditeur de la Carte Modèle -->
-        <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Configuration de la carte modèle</h3>
-          <p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Sélectionnez n'importe quelle carte de votre système et configurez son visuel. Elle sera dupliquée pour chaque pièce.
-          </p>
-          
-          <div id="editor-container" style="min-height: 200px; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; background: var(--card-background-color);">
-            <!-- Le sélecteur de carte universel et son éditeur natif s'injectent ici -->
-          </div>
-        </div>
-
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 15px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
+        <h3 style="margin: 0; color: var(--primary-color); font-size: 1.2em;">Configuration Visuelle des Pièces</h3>
+        <p style="margin: 0; font-size: 0.9em; color: var(--secondary-text-color);">
+          Réglez l'apparence de base de vos boutons ici. Les choix s'appliqueront uniformément à toutes les zones détectées qui possèdent des équipements.
+        </p>
+        <ha-form id="config-form"></ha-form>
       </div>
     `;
 
-    this._formElement = this.querySelector("#layout-form");
-    this._setupLayoutForm();
-    this._attachCardEditor();
+    this._formElement = this.querySelector("#config-form");
+
+    // Écouteur unique sur le formulaire visuel
+    this._formElement.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
+      const data = ev.detail.value;
+      
+      // On reconstruit proprement la config Lovelace à partir des choix graphiques
+      const newConfig = {
+        type: "custom:all-areas-display",
+        layout_type: data.layout_type || "grid",
+        layout_options: {
+          columns: data.layout_type === "grid" ? Math.max(2, data.columns || 2) : undefined
+        },
+        display_options: {
+          show_icon: data.show_icon !== false,
+          show_temp: data.show_temp === true,
+          show_humidity: data.show_humidity === true,
+          tap_action: data.tap_action || "toggle"
+        }
+      };
+
+      this.dispatchEvent(new CustomEvent("config-changed", {
+        detail: { config: newConfig },
+        bubbles: true,
+        composed: true,
+      }));
+    });
+
+    this._updateFormSchema();
   }
 
-  _setupLayoutForm() {
+  _updateFormSchema() {
+    if (!this._formElement) return;
+
     const currentLayout = this._config?.layout_type || "grid";
+    const displayOpts = this._config?.display_options || {};
+
+    // Schéma de formulaire natif HA
     const schema = [
       {
         name: "layout_type",
-        label: "Type d'affichage global",
+        label: "Disposition des pièces",
         type: "select",
         options: [
           ["grid", "Grille (Grid)"],
@@ -66,6 +80,7 @@ class AllAreasDisplayEditor extends HTMLElement {
       }
     ];
 
+    // Si on est en grille, on affiche le choix des colonnes
     if (currentLayout === "grid") {
       schema.push({
         name: "columns",
@@ -76,74 +91,54 @@ class AllAreasDisplayEditor extends HTMLElement {
       });
     }
 
+    // Options d'affichage des boutons de pièces
+    schema.push(
+      {
+        name: "tap_action",
+        label: "Action au clic sur la pièce",
+        type: "select",
+        options: [
+          ["toggle", "Allumer / Éteindre la pièce"],
+          ["more-info", "Ouvrir la fenêtre de détails (More Info)"],
+          ["none", "Aucune action"]
+        ]
+      },
+      {
+        name: "show_icon",
+        label: "Afficher l'icône de la pièce",
+        type: "boolean",
+        default: true
+      },
+      {
+        name: "show_temp",
+        label: "Afficher la température (si dispo)",
+        type: "boolean",
+        default: false
+      },
+      {
+        name: "show_humidity",
+        label: "Afficher l'humidité (si dispo)",
+        type: "boolean",
+        default: false
+      }
+    );
+
     this._formElement.schema = schema;
     this._formElement.data = {
       layout_type: currentLayout,
-      columns: this._config?.layout_options?.columns || 2
+      columns: this._config?.layout_options?.columns || 2,
+      tap_action: displayOpts.tap_action || "toggle",
+      show_icon: displayOpts.show_icon !== false,
+      show_temp: displayOpts.show_temp === true,
+      show_humidity: displayOpts.show_humidity === true
     };
-
-    this._formElement.addEventListener("value-changed", (ev) => {
-      ev.stopPropagation();
-      const value = ev.detail.value;
-      this._config = {
-        ...this._config,
-        layout_type: value.layout_type,
-        layout_options: {
-          columns: value.layout_type === "grid" ? Math.max(2, value.columns || 2) : undefined
-        }
-      };
-      this._fireConfigChanged();
-    });
-  }
-
-  async _attachCardEditor() {
-    const container = this.querySelector("#editor-container");
-    if (!container) return;
-
-    // Utilisation de l'élément officiel de gestion de sous-carte de HA
-    // Il gère nativement le catalogue complet ET l'interface de modification UI/Texte de la carte choisie
-    const cardEditor = document.createElement("hui-card-element-editor");
-    cardEditor.hass = this._hass;
-    
-    // On lui donne une structure par défaut si vide
-    cardEditor.value = this._config?.template_card || { type: "button", name: "[[area_name]]", entity: "[[default_entity]]" };
-
-    // Écoute les modifications de la carte (changement de type, options, sliders, etc.)
-    cardEditor.addEventListener("config-changed", (ev) => {
-      ev.stopPropagation();
-      
-      this._config = {
-        ...this._config,
-        template_card: ev.detail.config
-      };
-
-      this._fireConfigChanged();
-    });
-
-    container.innerHTML = "";
-    container.appendChild(cardEditor);
-    this._cardEditor = cardEditor;
-  }
-
-  _updateEditorInstance() {
-    if (this._cardEditor && this._hass) {
-      this._cardEditor.hass = this._hass;
-    }
-  }
-
-  _fireConfigChanged() {
-    this.dispatchEvent(new CustomEvent("config-changed", {
-      detail: { config: this._config },
-      bubbles: true,
-      composed: true,
-    }));
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES
+// 2. RENDU DU STRIP VISUEL AVEC OPTIONS
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -155,11 +150,11 @@ class AllAreasDisplay extends HTMLElement {
       type: "custom:all-areas-display",
       layout_type: "grid",
       layout_options: { columns: 2 },
-      template_card: {
-        type: "button",
-        name: "[[area_name]]",
-        icon: "[[area_icon]]",
-        entity: "[[default_entity]]"
+      display_options: {
+        show_icon: true,
+        show_temp: false,
+        show_humidity: false,
+        tap_action: "toggle"
       }
     };
   }
@@ -181,7 +176,7 @@ class AllAreasDisplay extends HTMLElement {
     const config = this._config;
     const hass = this._hass;
     const areas = Object.values(hass.areas || {});
-    const template = config.template_card || {};
+    const displayOpts = config.display_options || {};
 
     const mainLayoutConfig = {
       type: config.layout_type || 'grid',
@@ -195,6 +190,7 @@ class AllAreasDisplay extends HTMLElement {
     areas.forEach(area => {
       const areaId = area.area_id;
 
+      // 🔍 Recherche de l'entité pilote (lumière ou interrupteur) de la zone
       let defaultEntity = null;
       const matchCard = Object.values(hass.states).find(s => 
         (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.') || s.entity_id.startsWith('input_boolean.')) && 
@@ -202,37 +198,46 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (matchCard) defaultEntity = matchCard.entity_id;
 
+      // Filtrer les pièces vides (pas toutes les pièces ne sont équipées)
       if (!defaultEntity) return;
 
-      const areaName = area.name;
-      const areaIcon = area.icon || "mdi:home-outline";
-      const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
+      // Construction des informations secondaires (badges textuels si demandés)
+      let secondaryText = "";
+      
+      if (displayOpts.show_temp) {
+        const tSensor = Object.values(hass.states).find(s => 
+          s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
+          hass.entities[s.entity_id]?.area_id === areaId
+        );
+        if (tSensor) secondaryText += `${tSensor.state}${tSensor.attributes.unit_of_measurement || '°C'} `;
+      }
 
-      let areaTemp = "N/A";
-      const tSensor = Object.values(hass.states).find(s => 
-        s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
-        hass.entities[s.entity_id]?.area_id === areaId
-      );
-      if (tSensor) areaTemp = tSensor.state + (tSensor.attributes.unit_of_measurement || '°C');
+      if (displayOpts.show_humidity) {
+        const hSensor = Object.values(hass.states).find(s => 
+          s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'humidity' && 
+          hass.entities[s.entity_id]?.area_id === areaId
+        );
+        if (hSensor) secondaryText += `${hSensor.state}${hSensor.attributes.unit_of_measurement || '%'}`;
+      }
 
-      let areaHumidity = "N/A";
-      const hSensor = Object.values(hass.states).find(s => 
-        s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'humidity' && 
-        hass.entities[s.entity_id]?.area_id === areaId
-      );
-      if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
+      // Génération d'une carte de type "button" native standardisée pour chaque pièce
+      const areaCard = {
+        type: "button",
+        name: area.name,
+        icon: displayOpts.show_icon ? (area.icon || "mdi:home-outline") : "none",
+        entity: defaultEntity,
+        show_state: secondaryText !== "",
+        tap_action: {
+          action: displayOpts.tap_action === "none" ? "none" : displayOpts.tap_action
+        }
+      };
 
-      // Remplacement propre des variables dynamiques dans la structure configurée
-      let raw = JSON.stringify(template);
-      raw = raw.replaceAll('[[area_id]]', areaId)
-               .replaceAll('[[area_name]]', areaName)
-               .replaceAll('[[area_icon]]', areaIcon)
-               .replaceAll('[[area_slug]]', areaSlug)
-               .replaceAll('[[area_temp]]', areaTemp)
-               .replaceAll('[[area_humidity]]', areaHumidity)
-               .replaceAll('[[default_entity]]', defaultEntity);
+      // Si on a du texte secondaire (temp/humidité), on triche proprement avec l'état affiché
+      if (secondaryText !== "") {
+        areaCard.show_state = true;
+      }
 
-      mainLayoutConfig.cards.push(JSON.parse(raw));
+      mainLayoutConfig.cards.push(areaCard);
     });
 
     const helpers = await window.loadCardHelpers();
@@ -261,6 +266,6 @@ if (!window.customCards.some(c => c.type === 'all-areas-display')) {
     type: "all-areas-display",
     name: "All Areas Display",
     preview: true,
-    description: "Multi-générateur automatique utilisant les sous-éditeurs natifs."
+    description: "Affichage des pièces automatisées via une interface 100% visuelle."
   });
 }
