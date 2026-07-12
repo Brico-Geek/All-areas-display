@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI)
+// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI PROTECTION GLOBALE)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   async setConfig(config) {
@@ -23,6 +23,7 @@ class AllAreasDisplayEditor extends HTMLElement {
       return;
     }
 
+    // Structure HTML d'origine respectée à 100% pour ne pas perturber l'initialisation de Home Assistant
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
         <h3 style="margin: 0; color: var(--primary-color);">Configuration de la Mise en Page</h3>
@@ -34,32 +35,34 @@ class AllAreasDisplayEditor extends HTMLElement {
         <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
           Configurez ici la carte unique qui sera dupliquée pour chaque pièce détectée.
         </p>
-
-        <!-- Sélecteur rapide de type de carte sans casser Lovelace -->
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <label style="font-weight: bold; font-size: 0.9em; color: var(--primary-text-color);">Changer le type de carte rapidement :</label>
-          <select id="quick-card-type-selector" style="padding: 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
-            <option value="">-- Choisir un modèle --</option>
-            <option value="tile">Tuile (Tile)</option>
-            <option value="button">Bouton (Button)</option>
-            <option value="custom:mushroom-template-card">Mushroom Template</option>
-            <option value="custom:mushroom-chips-card">Mushroom Chips</option>
-          </select>
-        </div>
         
+        <!-- Zone d'injection préservée pour l'éditeur natif -->
         <div id="card-editor-container"></div>
 
-        <!-- Badges interactifs cliquables pour insérer les variables sans erreur -->
-        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 12px; border-radius: 6px; border: 1px dashed var(--divider-color);">
-          <strong style="display: block; margin-bottom: 8px;">Variables dynamiques (Cliquez pour copier) :</strong>
-          <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-badges">
-            <span class="var-badge" data-var="[[area_name]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_name]]</span>
-            <span class="var-badge" data-var="[[area_icon]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_icon]]</span>
-            <span class="var-badge" data-var="[[area_id]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_id]]</span>
-            <span class="var-badge" data-var="[[area_slug]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_slug]]</span>
-            <span class="var-badge" data-var="[[area_temp]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_temp]]</span>
-            <span class="var-badge" data-var="[[area_humidity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_humidity]]</span>
-            <span class="var-badge" data-var="[[default_entity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[default_entity]]</span>
+        <!-- Les outils personnalisés sont placés APRÈS, en isolation complète -->
+        <div id="luma-custom-tools" style="display: flex; flex-direction: column; gap: 15px; margin-top: 10px;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-weight: bold; font-size: 0.85em; color: var(--primary-text-color);">Changer le type de carte visuelle :</label>
+            <select id="quick-card-type-selector" style="padding: 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
+              <option value="">-- Choisir un modèle de base --</option>
+              <option value="tile">Tuile (Tile)</option>
+              <option value="button">Bouton (Button)</option>
+              <option value="custom:mushroom-template-card">Mushroom Template</option>
+              <option value="custom:mushroom-chips-card">Mushroom Chips</option>
+            </select>
+          </div>
+
+          <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 12px; border-radius: 6px; border: 1px dashed var(--divider-color);">
+            <strong style="display: block; margin-bottom: 6px;">Variables (Cliquez pour copier instantanément) :</strong>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-badges">
+              <span class="var-badge" data-var="[[area_name]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_name]]</span>
+              <span class="var-badge" data-var="[[area_icon]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_icon]]</span>
+              <span class="var-badge" data-var="[[area_id]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_id]]</span>
+              <span class="var-badge" data-var="[[area_slug]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_slug]]</span>
+              <span class="var-badge" data-var="[[area_temp]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_temp]]</span>
+              <span class="var-badge" data-var="[[area_humidity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_humidity]]</span>
+              <span class="var-badge" data-var="[[default_entity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[default_entity]]</span>
+            </div>
           </div>
         </div>
       </div>
@@ -69,7 +72,7 @@ class AllAreasDisplayEditor extends HTMLElement {
     const editorContainer = this.querySelector("#card-editor-container");
     const quickSelector = this.querySelector("#quick-card-type-selector");
 
-    // Écouteur pour changer le type de carte proprement
+    // Écouteur du sélecteur rapide de type de carte
     quickSelector.addEventListener("change", (ev) => {
       const selectedType = ev.target.value;
       if (!selectedType) return;
@@ -95,19 +98,18 @@ class AllAreasDisplayEditor extends HTMLElement {
         button_template: baseConfig
       });
       
-      quickSelector.value = ""; // Reset le sélecteur visuel
+      quickSelector.value = ""; 
     });
 
-    // Gestion du clic sur les badges pour copier directement
+    // Écouteur des badges cliquables
     this.querySelectorAll(".var-badge").forEach(badge => {
       badge.addEventListener("click", () => {
         const textToCopy = badge.getAttribute("data-var");
         navigator.clipboard.writeText(textToCopy);
         
-        // Petit effet visuel sympa pour confirmer la copie
         const originalBackground = badge.style.background;
-        badge.style.background = "#4caf50"; // Vert
-        setTimeout(() => { badge.style.background = originalBackground; }, 800);
+        badge.style.background = "var(--success-color, #4caf50)";
+        setTimeout(() => { badge.style.background = originalBackground; }, 700);
       });
     });
 
