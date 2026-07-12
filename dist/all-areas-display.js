@@ -83,6 +83,9 @@ class AllAreasDisplayEditor extends HTMLElement {
             Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
           </p>
           <div id="card-yaml-editor-container"></div>
+          <button id="apply-yaml-btn" style="padding: 10px; background: var(--accent-color, #03a9f4); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; transition: background 0.2s;">
+            Appliquer les modifications YAML
+          </button>
         </div>
 
       </div>
@@ -95,63 +98,60 @@ class AllAreasDisplayEditor extends HTMLElement {
     this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#sort-select").addEventListener("change", (e) => this._updateConfig({ sort_by: e.target.value }));
 
+    // Bouton de sauvegarde forcée du YAML
+    this.querySelector("#apply-yaml-btn").addEventListener("click", () => this._saveYamlContent());
+
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
     this._cardYamlEditor.autofocus = false;
     yamlContainer.appendChild(this._cardYamlEditor);
 
-    // Écoute des modifications en temps réel dans notre sous-éditeur
-    this._cardYamlEditor.addEventListener("value-changed", (e) => {
-      e.stopPropagation(); // Évite les conflits d'événements
-      this._handleYamlChange(e.detail.value);
-    });
-
-    // Attente du chargement complet pour faire le premier dump propre
+    // Premier rendu du texte dans la boîte d'édition
     setTimeout(() => {
       this._forceYamlDumpInEditor();
-    }, 200);
+    }, 150);
 
     this._updateUiFields();
   }
 
-  // Utilise l'utilitaire natif de Home Assistant pour convertir proprement l'objet JS en vrai YAML textuel
+  // Injecte la configuration actuelle dans la zone de texte
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
+    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
 
-    // On récupère le parseur officiel chargé par Home Assistant au lieu de notre bricolage
-    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
-
-    if (hassYaml && typeof hassYaml.dump === "function") {
-      this._cardYamlEditor.value = hassYaml.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
+    if (parser && typeof parser.dump === "function") {
+      this._cardYamlEditor.value = parser.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
     } else {
-      // Si jsyaml n'est pas encore dispo globalement, on utilise JSON.stringify temporairement pour ne rien perdre
-      // La zone de texte se mettra à jour proprement dès le premier événement
-      this._cardYamlEditor.value = JSON.stringify(currentCardConfig, null, 2);
+      this._cardYamlEditor.value = Object.entries(currentCardConfig)
+        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
     }
   }
 
-  // Parse le YAML tapé par l'utilisateur pour le renvoyer à l'éditeur principal HA
-  _handleYamlChange(rawText) {
-    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
-    if (!hassYaml || typeof hassYaml.load !== "function") return;
+  // Sauvegarde déclenchée par le bouton
+  _saveYamlContent() {
+    const rawText = this._cardYamlEditor.value;
+    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
 
     try {
-      const parsedCard = hassYaml.load(rawText);
-      if (parsedCard && typeof parsedCard === 'object') {
-        // Met à jour l'objet de configuration interne sans toucher au texte brut en cours de frappe
-        this._config = { ...this._config, card: parsedCard };
-        
-        // Déclenche la synchronisation avec le fichier de configuration principal de Lovelace
-        this.dispatchEvent(new CustomEvent("config-changed", {
-          detail: { config: this._config },
-          bubbles: true,
-          composed: true,
-        }));
+      if (parser && typeof parser.load === "function") {
+        const parsedCard = parser.load(rawText);
+        if (parsedCard && typeof parsedCard === 'object') {
+          this._config = { ...this._config, card: parsedCard };
+          this._fireConfigChanged();
+          
+          const btn = this.querySelector("#apply-yaml-btn");
+          btn.style.background = "var(--success-color, #4caf50)";
+          btn.textContent = "Appliqué avec succès !";
+          setTimeout(() => {
+            btn.style.background = "var(--accent-color, #03a9f4)";
+            btn.textContent = "Appliquer les modifications YAML";
+          }, 1500);
+        }
       }
     } catch (err) {
-      // On ignore l'erreur pendant la saisie (ex: tiret orphelin en cours d'écriture)
+      alert("Erreur de syntaxe YAML. Vérifiez l'indentation et les espaces.");
     }
   }
 
@@ -276,6 +276,7 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
+
 
 // ==========================================
 // 2. LA CARTE PRINCIPALE (MOTEUR GENERIQUE)
@@ -432,12 +433,12 @@ class AllAreasDisplay extends HTMLElement {
       this._childElements = [];
 
       if (userLayout.type === "auto") {
+        // Application de l'ajustement dynamique de largeur demandé
         const targetMinWidth = userLayout.min_width || "150px";
         
         const autoGridWrapper = document.createElement("div");
         autoGridWrapper.style.display = "grid";
-        // Utilisation de auto-fill à la place de auto-fit pour forcer l'alignement uniforme
-        autoGridWrapper.style.gridTemplateColumns = `repeat(auto-fill, minmax(${targetMinWidth}, 1fr))`;
+        autoGridWrapper.style.gridTemplateColumns = `repeat(auto-fit, minmax(${targetMinWidth}, 1fr))`;
         autoGridWrapper.style.gap = "8px";
         autoGridWrapper.style.width = "100%";
 
