@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS
+// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS (RÉÉCRIT DE ZÉRO)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -17,11 +17,12 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   async _render() {
     if (this._initialized) {
-      this._updateValues();
+      this._updateUiFields();
       return;
     }
     this._initialized = true;
 
+    // Structure HTML globale de l'éditeur
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
         
@@ -52,7 +53,7 @@ class AllAreasDisplayEditor extends HTMLElement {
           </div>
         </div>
 
-        <!-- SECTION NOUVELLE : TRI DES PIÈCES -->
+        <!-- SECTION TRI -->
         <div style="display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--divider-color); padding-bottom: 14px;">
           <label style="font-weight: bold; color: var(--primary-text-color);">Tri des pièces :</label>
           <select id="sort-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
@@ -74,7 +75,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         <div style="display: flex; flex-direction: column; gap: 6px;">
           <label style="font-weight: bold; color: var(--primary-text-color);">Modèle de la carte (YAML) :</label>
           <p style="margin: 0 0 4px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Collez ici le YAML d'une carte classique. Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
+            Collez ici le YAML d'une carte classique. Utilisez <code>this.area.id</code>, <code>this.area.name</code>, etc.
           </p>
           <div id="card-yaml-editor-container"></div>
         </div>
@@ -82,83 +83,49 @@ class AllAreasDisplayEditor extends HTMLElement {
       </div>
     `;
 
-    this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutChange());
-    this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutChange());
-    this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutChange());
+    // Attachement des Événements UI
+    this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutUiChange());
+    this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutUiChange());
+    this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#sort-select").addEventListener("change", (e) => this._updateConfig({ sort_by: e.target.value }));
 
+    // Injection et initialisation de l'éditeur de code officiel Home Assistant
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
     this._cardYamlEditor.autofocus = false;
-    
-    const initialCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    
-    // Attente du chargement pour être sûr d'obtenir l'instance jsyaml de Home Assistant
-    setTimeout(() => {
-      const hassYamlParser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze; 
-      if (hassYamlParser && typeof hassYamlParser.dump === "function") {
-        this._cardYamlEditor.value = hassYamlParser.dump(initialCardConfig, { indent: 2, lineWidth: -1 });
-      } else {
-        this._cardYamlEditor.value = Object.entries(initialCardConfig)
-          .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
-      }
-    }, 100);
+    yamlContainer.appendChild(this._cardYamlEditor);
 
-    // Écoute de l'événement natif de modification du texte
+    // Écoute des frappes clavier dans l'éditeur (Synchro ÉDITEUR -> CONFIG)
     this._cardYamlEditor.addEventListener("value-changed", (ev) => {
       ev.stopPropagation();
       const rawText = ev.detail.value;
+      
       try {
-        const loadParser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
-        if (loadParser && typeof loadParser.load === "function") {
-          const parsedCard = loadParser.load(rawText);
+        const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+        if (parser && typeof parser.load === "function") {
+          const parsedCard = parser.load(rawText);
+          
           if (parsedCard && typeof parsedCard === 'object') {
-            this._config = { ...this._config, card: parsedCard };
-            
-            // Événement direct dispatché proprement vers Lovelace
-            this.dispatchEvent(new CustomEvent("config-changed", {
-              detail: { config: this._config },
-              bubbles: true,
-              composed: true,
-            }));
+            // Évite de réécrire la config si le texte généré correspond déjà à l'objet pour stopper les boucles
+            if (JSON.stringify(this._config.card) !== JSON.stringify(parsedCard)) {
+              this._config = { ...this._config, card: parsedCard };
+              this._fireConfigChanged();
+            }
           }
         }
       } catch (err) {
-        // Silencieux pendant la frappe invalide
+        // En cours de frappe, le YAML peut être temporairement invalide : on ignore l'erreur
       }
     });
 
-    yamlContainer.appendChild(this._cardYamlEditor);
-    this._updateValues();
+    this._updateUiFields();
   }
 
-  _handleLayoutChange() {
-    const selectType = this.querySelector("#layout-select").value;
-    const isSquare = this.querySelector("#layout-square").checked;
-    let newLayout = { type: "grid" };
-
-    if (selectType === "vertical") {
-      newLayout = { type: "vertical-stack" };
-    } else if (selectType === "horizontal") {
-      newLayout = { type: "horizontal-stack" };
-    } else if (selectType === "auto") {
-      newLayout = { type: "auto" };
-    } else if (selectType === "grid") {
-      const inputCols = parseInt(this.querySelector("#grid-columns").value) || 2;
-      const cols = Math.max(2, inputCols);
-      newLayout = { type: "grid", columns: cols };
-    }
-
-    if (selectType === "grid" || selectType === "auto") {
-      newLayout.square = isSquare;
-    }
-
-    this._updateConfig({ layout: newLayout });
-  }
-
-  _updateValues() {
+  // Synchro CONFIG -> INTERFACE GRAPHIQUE & TEXTE YAML
+  _updateUiFields() {
     if (!this._config) return;
+
     const select = this.querySelector("#layout-select");
     const gridOptions = this.querySelector("#grid-options");
     const squareContainer = this.querySelector("#square-option-container");
@@ -168,6 +135,7 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     if (!select) return;
 
+    // 1. Mise à jour des sélecteurs graphiques
     const layout = this._config.layout || { type: "auto" };
     if (sortSelect) sortSelect.value = this._config.sort_by || "asc";
     
@@ -191,6 +159,57 @@ class AllAreasDisplayEditor extends HTMLElement {
       squareContainer.style.display = "flex";
       squareCheckbox.checked = layout.square || false;
     }
+
+    // 2. Mise à jour du texte dans l'éditeur de code (uniquement si nécessaire)
+    const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
+    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+
+    let formattedYaml = "";
+    if (parser && typeof parser.dump === "function") {
+      // Configuration d'indentation stricte à 2 espaces sans retour à la ligne automatique destructeur
+      formattedYaml = parser.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
+    } else {
+      formattedYaml = Object.entries(currentCardConfig)
+        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
+    }
+
+    // CONDITION CRUCIALE : On ne touche au texte que si Lovelace ou l'interface graphique a provoqué un vrai changement.
+    // Cela empêche l'éditeur de couper la saisie en plein milieu d'un mot.
+    if (this._cardYamlEditor && this._cardYamlEditor.value !== formattedYaml) {
+      // Vérification de sécurité pour ne pas écraser pendant que l'utilisateur tape un truc valide mais pas encore identique au dump
+      try {
+        const currentEditorParsed = parser?.load(this._cardYamlEditor.value);
+        if (JSON.stringify(currentEditorParsed) !== JSON.stringify(currentCardConfig)) {
+          this._cardYamlEditor.value = formattedYaml;
+        }
+      } catch(e) {
+        this._cardYamlEditor.value = formattedYaml;
+      }
+    }
+  }
+
+  // Gestion des changements depuis les clics/sélecteurs UI
+  _handleLayoutUiChange() {
+    const selectType = this.querySelector("#layout-select").value;
+    const isSquare = this.querySelector("#layout-square").checked;
+    let newLayout = { type: "grid" };
+
+    if (selectType === "vertical") {
+      newLayout = { type: "vertical-stack" };
+    } else if (selectType === "horizontal") {
+      newLayout = { type: "horizontal-stack" };
+    } else if (selectType === "auto") {
+      newLayout = { type: "auto" };
+    } else if (selectType === "grid") {
+      const inputCols = parseInt(this.querySelector("#grid-columns").value) || 2;
+      newLayout = { type: "grid", columns: Math.max(2, inputCols) };
+    }
+
+    if (selectType === "grid" || selectType === "auto") {
+      newLayout.square = isSquare;
+    }
+
+    this._updateConfig({ layout: newLayout });
   }
 
   _updateExcludedCheckboxes() {
@@ -233,6 +252,11 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   _updateConfig(newProps) {
     this._config = { ...this._config, ...newProps };
+    this._fireConfigChanged();
+    this._updateUiFields(); // Force l'interface à s'aligner sur les nouvelles propriétés
+  }
+
+  _fireConfigChanged() {
     this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: this._config },
       bubbles: true,
@@ -241,7 +265,6 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
-
 
 // ==========================================
 // 2. LA CARTE PRINCIPALE (MOTEUR GENERIQUE)
