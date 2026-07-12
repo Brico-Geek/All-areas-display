@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR AVEC SÉLECTEUR VISUEL INTÉGRÉ
+// 1. L'ÉDITEUR AVEC VRAI SÉLECTEUR NATIF CHARGÉ
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -10,39 +10,14 @@ class AllAreasDisplayEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._formElement) this._formElement.hass = hass;
+    if (this._cardPicker) this._cardPicker.hass = hass;
   }
 
-  _render() {
+  async _render() {
     if (this.querySelector("#layout-form")) {
       this._updateFormSchema();
-      this._highlightSelectedCard();
       return;
     }
-
-    // Liste des types de cartes principaux
-    const cardTypes = [
-      { type: "button", name: "Bouton", desc: "Un bouton simple pour piloter une entité" },
-      { type: "tile", name: "Tuile (Tile)", desc: "La nouvelle carte standard de Home Assistant" },
-      { type: "custom:bubble-card", name: "Bubble Card", desc: "Bouton ou icône au style épuré Bubble" },
-      { type: "entity", name: "Entité", desc: "Affiche l'état complet d'une seule entité" },
-      { type: "glance", name: "Coup d'œil (Glance)", desc: "Plusieurs entités alignées horizontalement" },
-      { type: "heading", name: "Titre (Heading)", desc: "Un entête textuel propre pour vos sections" }
-    ];
-
-    let cardsHtml = cardTypes.map(c => `
-      <div class="mock-card-btn" data-type="${c.type}" style="
-        background: var(--secondary-background-color);
-        border: 2px solid var(--divider-color);
-        border-radius: 12px;
-        padding: 16px;
-        text-align: center;
-        cursor: pointer;
-        transition: all 0.2s ease-in-out;
-      ">
-        <div style="font-weight: bold; font-size: 1.1em; color: var(--primary-text-color); margin-bottom: 4px;">${c.name}</div>
-        <div style="font-size: 0.85em; color: var(--secondary-text-color);">${c.desc}</div>
-      </div>
-    `).join('');
 
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
@@ -55,15 +30,15 @@ class AllAreasDisplayEditor extends HTMLElement {
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
-        <!-- 2. Grille de sélection visuelle -->
+        <!-- 2. Sélecteur visuel officiel de cartes -->
         <div>
           <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Sélectionner le type de carte à dupliquer</h3>
           <p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Choisissez la carte de base qui sera générée pour chaque pièce.
+            Choisissez la carte de base qui sera générée automatiquement pour chaque pièce.
           </p>
           
-          <div id="cards-grid" style="display: flex; flex-direction: column; gap: 12px; max-height: 400px; overflow-y: auto; padding-right: 5px;">
-            ${cardsHtml}
+          <div id="picker-container" style="max-height: 500px; overflow-y: auto; border: 1px solid var(--divider-color); border-radius: 8px; padding: 5px; background: var(--card-background-color);">
+            <!-- Chargement dynamique du Card Picker de HA -->
           </div>
         </div>
 
@@ -71,8 +46,47 @@ class AllAreasDisplayEditor extends HTMLElement {
     `;
 
     this._formElement = this.querySelector("#layout-form");
+    const pickerContainer = this.querySelector("#picker-container");
 
-    // Écouteur sur la mise en page
+    // Pour forcer l'affichage, on doit s'assurer que Home Assistant a bien enregistré le composant en interne
+    try {
+      const cardPicker = document.createElement("hui-card-picker");
+      cardPicker.hass = this._hass;
+      
+      // On lui passe l'état de l'aperçu complet des cartes personnalisées enregistrées sur HA
+      cardPicker.lovelace = {
+        config: { cards: [] },
+        mode: "storage"
+      };
+
+      pickerContainer.appendChild(cardPicker);
+      this._cardPicker = cardPicker;
+
+      // Écouteur : Quand on clique sur une carte du catalogue officiel
+      cardPicker.addEventListener("config-changed", (ev) => {
+        ev.stopPropagation();
+        const cardConfig = ev.detail.config;
+
+        if (cardConfig) {
+          // Injection des variables magiques par défaut si elles ne sont pas là
+          if (!cardConfig.name) cardConfig.name = "[[area_name]]";
+          if (!cardConfig.icon) cardConfig.icon = "[[area_icon]]";
+          if (!cardConfig.entity && !cardConfig.entities) cardConfig.entity = "[[default_entity]]";
+        }
+
+        this._config = {
+          ...this._config,
+          template_card: cardConfig
+        };
+        
+        this._fireConfigChanged();
+      });
+
+    } catch (e) {
+      pickerContainer.innerHTML = `<p style="color:red; padding:10px;">Erreur lors du chargement du catalogue natif : ${e.message}</p>`;
+    }
+
+    // Écouteur de la mise en page
     this._formElement.addEventListener("value-changed", (ev) => {
       ev.stopPropagation();
       const value = ev.detail.value;
@@ -86,55 +100,7 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._fireConfigChanged();
     });
 
-    // Écouteur au clic sur une des tuiles
-    this.querySelector("#cards-grid").addEventListener("click", (ev) => {
-      const btn = ev.target.closest(".mock-card-btn");
-      if (!btn) return;
-
-      const selectedType = btn.getAttribute("data-type");
-      
-      // Configuration de base propre au type choisi
-      let cardConfig = { type: selectedType };
-      
-      if (selectedType === "custom:bubble-card") {
-        cardConfig.card_type = "button";
-        cardConfig.button_type = "slider";
-      }
-      
-      // Injection automatique des variables
-      cardConfig.name = "[[area_name]]";
-      cardConfig.icon = "[[area_icon]]";
-      
-      if (selectedType === "glance" || selectedType === "entities") {
-        cardConfig.entities = ["[[default_entity]]"];
-      } else {
-        cardConfig.entity = "[[default_entity]]";
-      }
-
-      this._config = {
-        ...this._config,
-        template_card: cardConfig
-      };
-
-      this._highlightSelectedCard();
-      this._fireConfigChanged();
-    });
-
     this._updateFormSchema();
-    this._highlightSelectedCard();
-  }
-
-  _highlightSelectedCard() {
-    const currentType = this._config?.template_card?.type || "button";
-    this.querySelectorAll(".mock-card-btn").forEach(btn => {
-      if (btn.getAttribute("data-type") === currentType) {
-        btn.style.borderColor = "var(--primary-color)";
-        btn.style.background = "var(--primary-color-light, rgba(3, 169, 244, 0.1))";
-      } else {
-        btn.style.borderColor = "var(--divider-color)";
-        btn.style.background = "var(--secondary-background-color)";
-      }
-    });
   }
 
   _updateFormSchema() {
@@ -300,6 +266,6 @@ if (!window.customCards.some(c => c.type === 'all-areas-display')) {
     type: "all-areas-display",
     name: "All Areas Display",
     preview: true,
-    description: "Multi-générateur automatique de pièces."
+    description: "Sélecteur de cartes natif."
   });
 }
