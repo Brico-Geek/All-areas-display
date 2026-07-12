@@ -26,7 +26,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         <!-- SECTION 1 : DISPOSITION -->
         <div style="display: flex; flex-direction: column; gap: 6px;">
           <label style="font-weight: bold; color: var(--primary-text-color);">Disposition des pièces :</label>
-          <select id="layout-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);">
+          <select id="layout-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
             <option value="auto">Auto (S'adapte à l'espace disponible)</option>
             <option value="grid">Grille (Grid)</option>
             <option value="vertical">Vertical Stack</option>
@@ -37,7 +37,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         <!-- SECTION 2 : PIÈCES BANNIES -->
         <div style="display: flex; flex-direction: column; gap: 6px;">
           <label style="font-weight: bold; color: var(--primary-text-color);">Pièces bannies (Masquées) :</label>
-          <div id="excluded-areas-container" style="max-height: 120px; overflow-y: auto; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary-background-color);">
+          <div id="excluded-areas-container" style="max-height: 140px; overflow-y: auto; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary-background-color);">
             <!-- Rempli dynamiquement par JS -->
           </div>
         </div>
@@ -46,7 +46,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         <div style="display: flex; flex-direction: column; gap: 6px;">
           <label style="font-weight: bold; color: var(--primary-text-color);">Modèle de la carte (YAML) :</label>
           <p style="margin: 0 0 4px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Collez ici le YAML d'une carte classique. Remplacez les valeurs par <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>, etc.
+            Collez ici le YAML d'une carte classique. Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
           </p>
           <div id="card-yaml-editor-container"></div>
         </div>
@@ -54,20 +54,20 @@ class AllAreasDisplayEditor extends HTMLElement {
       </div>
     `;
 
-    // Événement sur le changement de disposition
+    // Gestion du changement de disposition
     this.querySelector("#layout-select").addEventListener("change", (ev) => {
       const val = ev.target.value;
-      let newLayout = { type: "grid", columns: 2 }; // Fallback
+      let newLayout = { type: "grid", columns: 2 };
       
       if (val === "vertical") newLayout = { type: "vertical-stack" };
       else if (val === "horizontal") newLayout = { type: "horizontal-stack" };
-      else if (val === "auto") newLayout = { type: "grid", columns: null, square: false }; // Auto masonry/grid sans colonnes strictes
+      else if (val === "auto") newLayout = { type: "grid", columns: null, square: false };
       else if (val === "grid") newLayout = { type: "grid", columns: 2, square: false };
 
       this._updateConfig({ layout: newLayout });
     });
 
-    // Initialisation de la zone d'édition YAML (uniquement pour la sous-carte)
+    // Initialisation du Code Editor natif de Home Assistant
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
@@ -79,9 +79,17 @@ class AllAreasDisplayEditor extends HTMLElement {
       ev.stopPropagation();
       try {
         const parsedCard = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
-        this._updateConfig({ card: parsedCard });
+        // On ne met à jour que si la carte a une structure valide
+        if (parsedCard && typeof parsedCard === 'object') {
+          this._config.card = parsedCard;
+          this.dispatchEvent(new CustomEvent("config-changed", {
+            detail: { config: this._config },
+            bubbles: true,
+            composed: true,
+          }));
+        }
       } catch (err) {
-        // En cours de saisie, syntaxe YAML incomplète ignorée temporairement
+        // Ignorer les erreurs de syntaxe pendant la saisie utilisateur
       }
     });
 
@@ -91,8 +99,6 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   _updateValues() {
     if (!this._config) return;
-    
-    // Aligner le selecteur visuel avec la config actuelle
     const select = this.querySelector("#layout-select");
     if (select && this._config.layout) {
       const type = this._config.layout.type;
@@ -110,7 +116,6 @@ class AllAreasDisplayEditor extends HTMLElement {
     const currentExclusions = (this._config.exclude || []).map(item => String(item).toLowerCase());
     const areas = Object.values(this._hass.areas);
 
-    // Éviter de ré-injecter si le nombre d'éléments n'a pas bougé
     if (container.children.length === areas.length) return;
 
     container.innerHTML = "";
@@ -224,10 +229,8 @@ class AllAreasDisplay extends HTMLElement {
     const userLayout = config.layout || { type: "grid", columns: 2 };
     const layoutConfig = { ...userLayout, cards: [] };
 
-    // Si le mode choisi est "auto" (représenté par columns: null dans notre éditeur)
     if (userLayout.type === "grid" && userLayout.columns === null) {
-      // Version fluide utilisant la grille native sans forcer un nombre fixe de colonnes
-      delete layoutConfig.columns;
+      delete layoutConfig.columns; // Permet à Home Assistant d'adapter la grille de manière fluide
     }
 
     // 3. Générer les cartes pour chaque pièce
