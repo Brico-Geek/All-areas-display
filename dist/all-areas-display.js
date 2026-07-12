@@ -14,6 +14,8 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   _render() {
+    // ÉTAPPE DE SÉCURITÉ CRITIQUE : Si l'éditeur est déjà injecté dans le DOM,
+    // on met juste à jour les valeurs sans toucher à la structure HTML.
     if (this._initialized) {
       this._updateValues();
       return;
@@ -67,7 +69,7 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._updateConfig({ layout: newLayout });
     });
 
-    // Initialisation du Code Editor natif de Home Assistant
+    // Initialisation unique de l'éditeur de code
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
@@ -79,17 +81,20 @@ class AllAreasDisplayEditor extends HTMLElement {
       ev.stopPropagation();
       try {
         const parsedCard = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
-        // On ne met à jour que si la carte a une structure valide
         if (parsedCard && typeof parsedCard === 'object') {
-          this._config.card = parsedCard;
+          // On reconstruit une nouvelle config propre pour éviter les références circulaires
+          const updatedConfig = {
+            ...this._config,
+            card: parsedCard
+          };
           this.dispatchEvent(new CustomEvent("config-changed", {
-            detail: { config: this._config },
+            detail: { config: updatedConfig },
             bubbles: true,
             composed: true,
           }));
         }
       } catch (err) {
-        // Ignorer les erreurs de syntaxe pendant la saisie utilisateur
+        // Mode silencieux pendant la saisie d'un YAML incomplet
       }
     });
 
@@ -230,7 +235,7 @@ class AllAreasDisplay extends HTMLElement {
     const layoutConfig = { ...userLayout, cards: [] };
 
     if (userLayout.type === "grid" && userLayout.columns === null) {
-      delete layoutConfig.columns; // Permet à Home Assistant d'adapter la grille de manière fluide
+      delete layoutConfig.columns;
     }
 
     // 3. Générer les cartes pour chaque pièce
