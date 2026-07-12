@@ -15,12 +15,13 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
-  // --- RENDU YAML CORRIGÉ (PROBLÈME DE COLONNE ET D'ESPACE) ---
+  // --- PETIT MOTEUR DE RENDU YAML LOCAL (ENFIN) PROPRE ---
   _stringifyYaml(obj, depth = 0) {
     const indent = "  ".repeat(depth);
     
-    if (obj === null || obj === undefined) return "";
+    if (obj === null || obj === undefined) return " ~";
     
+    // Cas 1 : Gestion des Tableaux (Listes)
     if (Array.isArray(obj)) {
       if (obj.length === 0) return " []";
       return "\n" + obj.map(item => {
@@ -28,39 +29,44 @@ class AllAreasDisplayEditor extends HTMLElement {
           const entries = Object.entries(item);
           if (entries.length === 0) return `${indent}- {}`;
           
-          // On traite chaque propriété de l'objet dans le tableau
-          return entries.map(([k, v], idx) => {
-            const val = this._stringifyYaml(v, depth + 1);
-            // Sécurité : si la valeur commence par un saut de ligne (sous-objet), pas d'espace.
-            // Sinon, on FORCE un espace après les deux-points, sans exception.
-            const sep = (val.startsWith("\n") || val.startsWith(" ")) ? "" : " ";
-            
-            if (idx === 0) {
-              // Le premier élément porte le tiret de la liste
-              return `${indent}- ${k}:${sep}${val.trim()}`;
-            } else {
-              // Les éléments suivants sont alignés verticalement sous la première clé
-              return `${indent}  ${k}:${sep}${val.trim()}`;
-            }
+          // Pour le premier élément de l'objet dans le tableau, on met le tiret
+          const firstKey = entries[0][0];
+          const firstVal = entries[0][1];
+          const isFirstValComplex = typeof firstVal === 'object' && firstVal !== null;
+          
+          const firstLine = `${indent}- ${firstKey}:${isFirstValComplex ? "" : " "}${this._stringifyYaml(firstVal, depth + 1)}`;
+          
+          // Les éléments suivants du même objet sont décalés (alignés sous la clé)
+          const restLines = entries.slice(1).map(([k, v]) => {
+            const isComplex = typeof v === 'object' && v !== null;
+            return `${indent}  ${k}:${isComplex ? "" : " "}${this._stringifyYaml(v, depth + 1)}`;
           }).join("\n");
+          
+          return restLines ? `${firstLine}\n${restLines}` : firstLine;
         }
-        // Pour les tableaux de valeurs simples
+        
+        // Tableau de valeurs simples (ex: alert_classes)
         return `${indent}- ${item === '' ? '""' : item}`;
       }).join("\n");
     }
     
+    // Cas 2 : Gestion des Objets
     if (typeof obj === 'object') {
       const entries = Object.entries(obj);
       if (entries.length === 0) return " {}";
+      
       const content = entries.map(([k, v]) => {
-        const valueStr = this._stringifyYaml(v, depth + 1);
-        const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
-        return `${indent}${k}:${separator}${valueStr.trim()}`;
+        const isComplex = typeof v === 'object' && v !== null;
+        // Si c'est un objet/tableau, pas d'espace car _stringifyYaml va créer un retour à la ligne
+        // Si c'est une valeur simple, on met le fameux espace requis !
+        const sep = isComplex ? "" : " ";
+        return `${indent}${k}:${sep}${this._stringifyYaml(v, depth + 1)}`;
       }).join("\n");
+      
       return depth === 0 ? content : "\n" + content;
     }
     
-    // Protection et formatage des chaînes
+    // Cas 3 : Valeurs simples (Chaînes, Nombres, Booléens)
     const str = String(obj);
     if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
       return `"${str.replace(/"/g, '\\"')}"`;
