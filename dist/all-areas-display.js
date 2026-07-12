@@ -1,5 +1,163 @@
 // ==========================================
-// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES (RÉPARÉ)
+// 1. L'ÉDITEUR SIMPLE (VISUEL + CODE CONFIG)
+// ==========================================
+class AllAreasDisplayEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config;
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._formElement) this._formElement.hass = hass;
+    if (this._cardEditor) this._cardEditor.hass = hass;
+  }
+
+  async _render() {
+    if (this.querySelector("#layout-form")) {
+      this._updateEditorHass();
+      return;
+    }
+
+    this.innerHTML = `
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
+        
+        <!-- 1. Choix de la Disposition globale -->
+        <div>
+          <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1em;">1. Disposition globale</h3>
+          <ha-form id="layout-form"></ha-form>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
+        
+        <!-- 2. Éditeur de carte avec bouton de bascule d'interface -->
+        <div>
+          <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1em;">2. Configuration de la carte modèle</h3>
+          
+          <div id="editor-container" style="min-height: 150px; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; background: var(--card-background-color);">
+            <!-- L'éditeur officiel (Visuel ou Code YAML) s'injecte ici -->
+          </div>
+          
+          <button id="toggle-editor-mode" style="
+            margin-top: 12px;
+            width: 100%;
+            background: var(--secondary-background-color);
+            color: var(--primary-text-color);
+            border: 1px solid var(--divider-color);
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+          ">
+            🔄 Basculer entre Éditeur Visuel / Code (YAML)
+          </button>
+        </div>
+
+      </div>
+    `;
+
+    this._formElement = this.querySelector("#layout-form");
+    this._setupLayoutForm();
+    await this._attachCardEditor();
+
+    this.querySelector("#toggle-editor-mode").addEventListener("click", () => {
+      if (this._cardEditor) {
+        this._cardEditor.toggleMode();
+      }
+    });
+  }
+
+  _setupLayoutForm() {
+    const currentLayout = this._config?.layout_type || "grid";
+    const schema = [
+      {
+        name: "layout_type",
+        label: "Type d'affichage global",
+        type: "select",
+        options: [
+          ["grid", "Grille (Grid)"],
+          ["horizontal-stack", "Alignement Horizontal"],
+          ["vertical-stack", "Alignement Vertical"]
+        ]
+      }
+    ];
+
+    if (currentLayout === "grid") {
+      schema.push({
+        name: "columns",
+        label: "Nombre de colonnes",
+        type: "integer",
+        default: 2,
+        valueMin: 2
+      });
+    }
+
+    this._formElement.schema = schema;
+    this._formElement.data = {
+      layout_type: currentLayout,
+      columns: this._config?.layout_options?.columns || 2
+    };
+
+    this._formElement.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
+      const value = ev.detail.value;
+      this._config = {
+        ...this._config,
+        layout_type: value.layout_type,
+        layout_options: {
+          columns: value.layout_type === "grid" ? Math.max(2, value.columns || 2) : undefined
+        }
+      };
+      this._fireConfigChanged();
+    });
+  }
+
+  async _attachCardEditor() {
+    const container = this.querySelector("#editor-container");
+    if (!container) return;
+
+    const cardEditor = document.createElement("hui-card-element-editor");
+    cardEditor.hass = this._hass;
+    
+    cardEditor.value = this._config?.template_card || { 
+      type: "button", 
+      name: "[[area_name]]", 
+      icon: "[[area_icon]]", 
+      entity: "[[default_entity]]" 
+    };
+
+    cardEditor.addEventListener("config-changed", (ev) => {
+      ev.stopPropagation();
+      this._config = {
+        ...this._config,
+        template_card: ev.detail.config
+      };
+      this._fireConfigChanged();
+    });
+
+    container.innerHTML = "";
+    container.appendChild(cardEditor);
+    this._cardEditor = cardEditor;
+  }
+
+  _updateEditorHass() {
+    if (this._cardEditor && this._hass) this._cardEditor.hass = this._hass;
+    if (this._formElement && this._hass) this._formElement.hass = this._hass;
+  }
+
+  _fireConfigChanged() {
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: this._config },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+}
+customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
+
+
+// ==========================================
+// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES (ULTRA-SÉCURISÉ)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -22,8 +180,7 @@ class AllAreasDisplay extends HTMLElement {
 
   constructor() {
     super();
-    // On crée un conteneur racine pour isoler notre affichage
-    this.innerHTML = `<div id="root"></div>`;
+    this.innerHTML = `<div id="root" style="width: 100%; min-height: 50px;"></div>`;
     this.content = this.querySelector('#root');
     this._childElements = [];
   }
@@ -32,7 +189,6 @@ class AllAreasDisplay extends HTMLElement {
     this._hass = hass;
     if (!this._config) return;
 
-    // Si les cartes enfants sont déjà créées, on met juste à jour leur objet HASS
     if (this._childElements.length > 0) {
       this._childElements.forEach(el => {
         if (el) el.hass = hass;
@@ -50,19 +206,34 @@ class AllAreasDisplay extends HTMLElement {
     const template = config.template_card;
 
     if (!template || Object.keys(template).length === 0) {
-      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Définissez une carte valide dans la configuration.</div>`;
+      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Définissez une carte modèle.</div>`;
       this._childElements = [];
       return;
     }
 
+    // TEST DE SÉCURITÉ VISUELLE : On force un texte temporaire pour voir si le DOM répond
+    if (this.content.innerHTML === '') {
+      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Chargement des pièces...</div>`;
+    }
+
+    // Récupération sécurisée des helpers de Home Assistant
+    let helpers;
+    if (window.loadCardHelpers) {
+      helpers = await window.loadCardHelpers();
+    } else if (window.frontendVersion) {
+      // Alternative si loadCardHelpers met du temps à se lier globalement
+      helpers = await document.createElement("hui-root").constructor.prototype.loadCardHelpers();
+    }
+
+    if (!helpers) {
+      this.content.innerHTML = `<div style="padding:10px; color:red;">Erreur : Impossible de charger les outils internes de Home Assistant.</div>`;
+      return;
+    }
+
     const areas = Object.values(hass.areas || {});
-    const helpers = await window.loadCardHelpers();
-    
-    // Nettoyage complet avant reconstruction
     this.content.innerHTML = '';
     this._childElements = [];
 
-    // 1. On prépare le conteneur HTML selon le layout sélectionné
     const layoutType = config.layout_type || 'grid';
     const gridWrapper = document.createElement('div');
 
@@ -82,11 +253,9 @@ class AllAreasDisplay extends HTMLElement {
       gridWrapper.style.gap = '8px';
     }
 
-    // 2. Génération et injection de chaque carte pièce par pièce
     areas.forEach(area => {
       const areaId = area.area_id;
 
-      // Recherche d'une entité actionable
       let defaultEntity = null;
       const matchCard = Object.values(hass.states).find(s => 
         (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.') || s.entity_id.startsWith('input_boolean.')) && 
@@ -94,13 +263,16 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (matchCard) defaultEntity = matchCard.entity_id;
 
-      if (!defaultEntity) return; // On saute la pièce si elle n'a rien d'actionnable
+      // Si aucune entité n'est trouvée, on met une entité générique ou existante pour ne pas bloquer l'affichage
+      if (!defaultEntity) {
+        const anyEntity = Object.values(hass.states).find(s => hass.entities[s.entity_id]?.area_id === areaId);
+        defaultEntity = anyEntity ? anyEntity.entity_id : 'sun.sun'; 
+      }
 
       const areaName = area.name;
       const areaIcon = area.icon || "mdi:home-outline";
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
 
-      // Capteurs additionnels
       let areaTemp = "N/A";
       const tSensor = Object.values(hass.states).find(s => 
         s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
@@ -115,7 +287,6 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
 
-      // Remplacement des variables
       let raw = JSON.stringify(template);
       raw = raw.replaceAll('[[area_id]]', areaId)
                .replaceAll('[[area_name]]', areaName)
@@ -128,25 +299,25 @@ class AllAreasDisplay extends HTMLElement {
       const cardConfig = JSON.parse(raw);
 
       try {
-        // On crée la carte unitaire
         const cardElement = helpers.createCardElement(cardConfig);
         cardElement.hass = hass;
-        
-        // On l'ajoute à notre disposition et au suivi des mises à jour
         gridWrapper.appendChild(cardElement);
         this._childElements.push(cardElement);
       } catch (e) {
-        console.error("Erreur création sous-carte:", e);
+        console.error("Erreur d'initialisation de la sous-carte :", e);
       }
     });
 
-    // On injecte le tout d'un coup dans le DOM
-    this.content.appendChild(gridWrapper);
+    if (this._childElements.length === 0) {
+      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Aucune pièce avec entité compatible trouvée.</div>`;
+    } else {
+      this.content.appendChild(gridWrapper);
+    }
   }
 
   setConfig(config) {
     this._config = config;
-    this._buildCards(); // On force la reconstruction quand la config change à gauche
+    this._buildCards();
   }
 
   getCardSize() {
