@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL AVANCÉ (SÉCURISÉ)
+// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   async setConfig(config) {
@@ -9,95 +9,108 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._layoutFormElement) this._layoutFormElement.hass = hass;
-    if (this._cardEditorElement) this._cardEditorElement.hass = hass;
+    if (this._layoutFormElement) {
+      this._layoutFormElement.hass = hass;
+    }
+    if (this._cardEditorElement) {
+      this._cardEditorElement.hass = hass;
+    }
   }
 
   async _render() {
-    // Si l'interface de base est déjà là, on met juste à jour les données du formulaire de layout
     if (this._layoutFormElement) {
       this._updateFormValues();
       return;
     }
 
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px;">
-        <h3 style="margin: 0; color: var(--primary-color); font-size: 1.1em;">1. Configuration de la Mise en Page</h3>
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
+        <h3 style="margin: 0; color: var(--primary-color);">Configuration de la Mise en Page</h3>
         <ha-form id="layout-form"></ha-form>
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 5px 0;">
         
-        <h3 style="margin: 0; color: var(--primary-color); font-size: 1.1em;">2. Modèle de Carte Enfant</h3>
+        <h3 style="margin: 0; color: var(--primary-color);">Configuration du Modèle de Carte</h3>
         <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Sélectionnez le type de carte à dupliquer pour chaque pièce.
+          Configurez ici la carte unique qui sera dupliquée pour chaque pièce détectée.
         </p>
 
-        <select id="card-type-selector" style="padding: 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
-          <option value="tile">Tuile (Tile - Standard)</option>
-          <option value="button">Bouton (Button)</option>
-          <option value="custom:mushroom-template-card">Mushroom Template</option>
-          <option value="custom:mushroom-chips-card">Mushroom Chips</option>
-          <option value="custom:button-card">Custom Button Card</option>
-        </select>
-
-        <div style="background: var(--secondary-background-color); padding: 10px; border-radius: 6px; border: 1px dashed var(--divider-color); font-size: 0.85em;">
-          <strong style="display: block; margin-bottom: 4px;">💡 Variables (Cliquez pour copier) :</strong>
-          <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-badges">
-            <span class="var-badge" data-var="[[area_name]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_name]]</span>
-            <span class="var-badge" data-var="[[area_icon]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_icon]]</span>
-            <span class="var-badge" data-var="[[default_entity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[default_entity]]</span>
-            <span class="var-badge" data-var="[[area_temp]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_temp]]</span>
-            <span class="var-badge" data-var="[[area_humidity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_humidity]]</span>
-            <span class="var-badge" data-var="[[area_slug]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_slug]]</span>
-          </div>
+        <!-- Sélecteur rapide de type de carte sans casser Lovelace -->
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label style="font-weight: bold; font-size: 0.9em; color: var(--primary-text-color);">Changer le type de carte rapidement :</label>
+          <select id="quick-card-type-selector" style="padding: 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
+            <option value="">-- Choisir un modèle --</option>
+            <option value="tile">Tuile (Tile)</option>
+            <option value="button">Bouton (Button)</option>
+            <option value="custom:mushroom-template-card">Mushroom Template</option>
+            <option value="custom:mushroom-chips-card">Mushroom Chips</option>
+          </select>
         </div>
         
         <div id="card-editor-container"></div>
+
+        <!-- Badges interactifs cliquables pour insérer les variables sans erreur -->
+        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 12px; border-radius: 6px; border: 1px dashed var(--divider-color);">
+          <strong style="display: block; margin-bottom: 8px;">Variables dynamiques (Cliquez pour copier) :</strong>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-badges">
+            <span class="var-badge" data-var="[[area_name]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_name]]</span>
+            <span class="var-badge" data-var="[[area_icon]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_icon]]</span>
+            <span class="var-badge" data-var="[[area_id]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_id]]</span>
+            <span class="var-badge" data-var="[[area_slug]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_slug]]</span>
+            <span class="var-badge" data-var="[[area_temp]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_temp]]</span>
+            <span class="var-badge" data-var="[[area_humidity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_humidity]]</span>
+            <span class="var-badge" data-var="[[default_entity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[default_entity]]</span>
+          </div>
+        </div>
       </div>
     `;
 
     this._layoutFormElement = this.querySelector("#layout-form");
     const editorContainer = this.querySelector("#card-editor-container");
-    const typeSelector = this.querySelector("#card-type-selector");
+    const quickSelector = this.querySelector("#quick-card-type-selector");
 
-    // Assigner la valeur actuelle au sélecteur
-    if (this._config.button_template?.type) {
-      typeSelector.value = this._config.button_template.type;
-    }
+    // Écouteur pour changer le type de carte proprement
+    quickSelector.addEventListener("change", (ev) => {
+      const selectedType = ev.target.value;
+      if (!selectedType) return;
 
-    // Écouteur pour le changement de type de carte
-    typeSelector.addEventListener("change", (ev) => {
-      const targetType = ev.target.value;
-      let newTemplate = { type: targetType };
+      let baseConfig = { type: selectedType };
       
-      if (targetType === "tile" || targetType === "button") {
-        newTemplate.entity = "[[default_entity]]";
-        newTemplate.name = "[[area_name]]";
-        newTemplate.icon = "[[area_icon]]";
-      } else if (targetType.includes("mushroom-template")) {
-        newTemplate.primary = "[[area_name]]";
-        newTemplate.secondary = "[[area_temp]]";
-        newTemplate.icon = "[[area_icon]]";
+      if (selectedType === "tile" || selectedType === "button") {
+        baseConfig.entity = "[[default_entity]]";
+        baseConfig.name = "[[area_name]]";
+        baseConfig.icon = "[[area_icon]]";
+      } else if (selectedType.includes("mushroom-template")) {
+        baseConfig.primary = "[[area_name]]";
+        baseConfig.secondary = "[[area_temp]]";
+        baseConfig.icon = "[[area_icon]]";
       }
 
-      this._config = { ...this._config, button_template: newTemplate };
-      if (this._cardEditorElement) this._cardEditorElement.value = newTemplate;
+      if (this._cardEditorElement) {
+        this._cardEditorElement.value = baseConfig;
+      }
       
-      this._fireConfigChanged(this._config);
+      this._fireConfigChanged({
+        ...this._config,
+        button_template: baseConfig
+      });
+      
+      quickSelector.value = ""; // Reset le sélecteur visuel
     });
 
-    // Rendre les badges copiables
+    // Gestion du clic sur les badges pour copier directement
     this.querySelectorAll(".var-badge").forEach(badge => {
-      badge.addEventListener("click", (ev) => {
-        const text = ev.target.getAttribute("data-var");
-        navigator.clipboard.writeText(text).then(() => {
-          badge.style.background = "var(--success-color, #4caf50)";
-          setTimeout(() => badge.style.background = "var(--primary-color)", 1000);
-        });
+      badge.addEventListener("click", () => {
+        const textToCopy = badge.getAttribute("data-var");
+        navigator.clipboard.writeText(textToCopy);
+        
+        // Petit effet visuel sympa pour confirmer la copie
+        const originalBackground = badge.style.background;
+        badge.style.background = "#4caf50"; // Vert
+        setTimeout(() => { badge.style.background = originalBackground; }, 800);
       });
     });
 
-    // Schéma Layout
     const layoutSchema = [
       {
         name: "layout_type",
@@ -106,16 +119,22 @@ class AllAreasDisplayEditor extends HTMLElement {
           select: {
             options: [
               { value: "grid", label: "Grille (Grid)" },
-              { value: "horizontal-stack", label: "Pile Horizontale" },
-              { value: "vertical-stack", label: "Pile Verticale" }
+              { value: "horizontal-stack", label: "Pile Horizontale (Horizontal)" },
+              { value: "vertical-stack", label: "Pile Verticale (Vertical)" }
             ]
           }
         }
       },
       {
         name: "columns",
-        label: "Nombre de colonnes (Grille)",
-        selector: { number: { min: 1, max: 12, mode: "box" } }
+        label: "Nombre de colonnes (Mode Grille)",
+        selector: {
+          number: {
+            min: 1,
+            max: 12,
+            mode: "box"
+          }
+        }
       }
     ];
 
@@ -124,15 +143,17 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     this._layoutFormElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
-      this._config = {
+      const newConfig = {
         ...this._config,
         layout_type: value.layout_type || "grid",
-        layout_options: { ...this._config.layout_options, columns: value.columns || 2 }
+        layout_options: {
+          ...this._config.layout_options,
+          columns: value.columns || 2
+        }
       };
-      this._fireConfigChanged(this._config);
+      this._fireConfigChanged(newConfig);
     });
 
-    // Chargement sécurisé du sous-éditeur HA
     try {
       const helpers = await window.loadCardHelpers();
       this._cardEditorElement = document.createElement("hui-card-element-editor");
@@ -141,13 +162,17 @@ class AllAreasDisplayEditor extends HTMLElement {
 
       this._cardEditorElement.addEventListener("config-changed", (ev) => {
         ev.stopPropagation();
-        this._config = { ...this._config, button_template: ev.detail.config };
-        this._fireConfigChanged(this._config);
+        const newConfig = {
+          ...this._config,
+          button_template: ev.detail.config
+        };
+        this._fireConfigChanged(newConfig);
       });
 
       editorContainer.appendChild(this._cardEditorElement);
     } catch (err) {
-      console.error("Erreur chargement sous-éditeur Lovelace:", err);
+      console.error("Erreur sélecteur HA:", err);
+      editorContainer.innerHTML = `<p style="color:red;">Erreur de chargement de l'éditeur visuel.</p>`;
     }
   }
 
@@ -285,11 +310,7 @@ class AllAreasDisplay extends HTMLElement {
         return JSON.parse(str);
       };
 
-      try {
-        layoutConfig.cards.push(replaceVariables(templateToUse));
-      } catch (e) {
-        console.error("Erreur parsing variables sur carte enfant:", e);
-      }
+      layoutConfig.cards.push(replaceVariables(templateToUse));
     });
 
     try {
@@ -301,7 +322,7 @@ class AllAreasDisplay extends HTMLElement {
       this.content.appendChild(element);
       this._layoutElement = element;
     } catch (err) {
-      console.error("Erreur rendu conteneur principal:", err);
+      console.error("Erreur rendu:", err);
     }
   }
 
@@ -313,7 +334,7 @@ customElements.define('all-areas-display', AllAreasDisplay);
 
 
 // ==========================================
-// 3. ENREGISTREMENT CATALOGUE
+// 3. ENREGISTREMENT CATALOGUE (OK LOVELACE)
 // ==========================================
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
