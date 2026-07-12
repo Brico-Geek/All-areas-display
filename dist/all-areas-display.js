@@ -15,13 +15,13 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
-  // --- PETIT MOTEUR DE RENDU YAML LOCAL (ENFIN) PROPRE ---
+  // --- RENDU YAML SÉCURISÉ ET CORRIGÉ ---
   _stringifyYaml(obj, depth = 0) {
     const indent = "  ".repeat(depth);
     
     if (obj === null || obj === undefined) return " ~";
     
-    // Cas 1 : Gestion des Tableaux (Listes)
+    // TABLEAUX (Listes)
     if (Array.isArray(obj)) {
       if (obj.length === 0) return " []";
       return "\n" + obj.map(item => {
@@ -29,44 +29,60 @@ class AllAreasDisplayEditor extends HTMLElement {
           const entries = Object.entries(item);
           if (entries.length === 0) return `${indent}- {}`;
           
-          // Pour le premier élément de l'objet dans le tableau, on met le tiret
-          const firstKey = entries[0][0];
-          const firstVal = entries[0][1];
-          const isFirstValComplex = typeof firstVal === 'object' && firstVal !== null;
+          // Premier champ de l'objet accroché au tiret "-"
+          const [firstKey, firstVal] = entries[0];
+          let firstLine = `${indent}- ${firstKey}:`;
           
-          const firstLine = `${indent}- ${firstKey}:${isFirstValComplex ? "" : " "}${this._stringifyYaml(firstVal, depth + 1)}`;
+          if (typeof firstVal === 'object' && firstVal !== null) {
+            firstLine += this._stringifyYaml(firstVal, depth + 1);
+          } else {
+            const strVal = String(firstVal);
+            const formattedVal = (strVal.includes('#') || strVal.includes(':') || strVal === '') ? `"${strVal.replace(/"/g, '\\"')}"` : strVal;
+            firstLine += ` ${formattedVal}`;
+          }
           
-          // Les éléments suivants du même objet sont décalés (alignés sous la clé)
+          // Les champs suivants du même objet (indentés de 2 espaces de plus)
           const restLines = entries.slice(1).map(([k, v]) => {
-            const isComplex = typeof v === 'object' && v !== null;
-            return `${indent}  ${k}:${isComplex ? "" : " "}${this._stringifyYaml(v, depth + 1)}`;
+            let line = `${indent}  ${k}:`;
+            if (typeof v === 'object' && v !== null) {
+              return line + this._stringifyYaml(v, depth + 1);
+            } else {
+              const strV = String(v);
+              const formattedV = (strV.includes('#') || strV.includes(':') || strV === '') ? `"${strV.replace(/"/g, '\\"')}"` : strV;
+              return line + ` ${formattedV}`;
+            }
           }).join("\n");
           
           return restLines ? `${firstLine}\n${restLines}` : firstLine;
         }
         
-        // Tableau de valeurs simples (ex: alert_classes)
-        return `${indent}- ${item === '' ? '""' : item}`;
+        // Valeur simple dans un tableau (ex: alert_classes)
+        return `${indent}- ${obj === '' ? '""' : item}`;
       }).join("\n");
     }
     
-    // Cas 2 : Gestion des Objets
+    // OBJETS
     if (typeof obj === 'object') {
       const entries = Object.entries(obj);
       if (entries.length === 0) return " {}";
       
       const content = entries.map(([k, v]) => {
-        const isComplex = typeof v === 'object' && v !== null;
-        // Si c'est un objet/tableau, pas d'espace car _stringifyYaml va créer un retour à la ligne
-        // Si c'est une valeur simple, on met le fameux espace requis !
-        const sep = isComplex ? "" : " ";
-        return `${indent}${k}:${sep}${this._stringifyYaml(v, depth + 1)}`;
+        let line = `${indent}${k}:`;
+        if (typeof v === 'object' && v !== null) {
+          // L'objet enfant va gérer son propre retour à la ligne
+          return line + this._stringifyYaml(v, depth + 1);
+        } else {
+          // Valeur simple : on force l'espace et on reste sur la même ligne
+          const strV = String(v);
+          const formattedV = (strV.includes('#') || strV.includes(':') || strV === '') ? `"${strV.replace(/"/g, '\\"')}"` : strV;
+          return line + ` ${formattedV}`;
+        }
       }).join("\n");
       
       return depth === 0 ? content : "\n" + content;
     }
     
-    // Cas 3 : Valeurs simples (Chaînes, Nombres, Booléens)
+    // VALEURS SIMPLES (Cas de secours)
     const str = String(obj);
     if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
       return `"${str.replace(/"/g, '\\"')}"`;
