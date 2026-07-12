@@ -1,131 +1,81 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI)
+// 1. L'ÉDITEUR DE CODE YAML (ROBUSTE ET SIMPLE)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
-  async setConfig(config) {
+  setConfig(config) {
     this._config = config;
-    await this._render();
+    this._render();
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (this._layoutFormElement) {
-      this._layoutFormElement.hass = hass;
-    }
-    if (this._cardEditorElement) {
-      this._cardEditorElement.hass = hass;
+    if (this._yamlEditor) {
+      this._yamlEditor.hass = hass;
     }
   }
 
-  async _render() {
-    if (this._layoutFormElement) {
-      this._updateFormValues();
-      return;
-    }
+  _render() {
+    if (this._yamlEditor) return;
 
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
-        <h3 style="margin: 0; color: var(--primary-color);">Configuration de la Mise en Page</h3>
-        <ha-form id="layout-form"></ha-form>
-        
-        <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 5px 0;">
-        
-        <h3 style="margin: 0; color: var(--primary-color);">Configuration du Modèle de Carte</h3>
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 15px;">
+        <h3 style="margin: 0; color: var(--primary-color);">Configuration (Style Auto-Entities)</h3>
         <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Configurez ici la carte unique qui sera dupliquée pour chaque pièce détectée.
+          Définissez la mise en page globale et le modèle de carte en YAML. Le modèle sera dupliqué pour chaque pièce détectée.
         </p>
-        
-        <div id="card-editor-container"></div>
 
-        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 10px; border-radius: 6px;">
-          <strong>Variables dynamiques utilisables :</strong><br>
-          <code>[[area_name]]</code>, <code>[[area_icon]]</code>, <code>[[area_id]]</code>, <code>[[area_slug]]</code>, <code>[[area_temp]]</code>, <code>[[area_humidity]]</code>, <code>[[default_entity]]</code>
+        <!-- Zone d'injection de l'éditeur de code officiel -->
+        <div id="yaml-editor-container"></div>
+
+        <!-- Aide mémoire pour les variables -->
+        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 12px; border-radius: 6px; border: 1px dashed var(--divider-color);">
+          <strong style="display: block; margin-bottom: 6px;">Variables disponibles dans votre YAML :</strong>
+          <code style="display: block; margin-bottom: 4px;">[[area_name]]</code>
+          <code style="display: block; margin-bottom: 4px;">[[area_icon]]</code>
+          <code style="display: block; margin-bottom: 4px;">[[area_id]]</code>
+          <code style="display: block; margin-bottom: 4px;">[[area_slug]]</code>
+          <code style="display: block; margin-bottom: 4px;">[[area_temp]]</code>
+          <code style="display: block; margin-bottom: 4px;">[[area_humidity]]</code>
+          <code style="display: block;">[[default_entity]]</code>
         </div>
       </div>
     `;
 
-    this._layoutFormElement = this.querySelector("#layout-form");
-    const editorContainer = this.querySelector("#card-editor-container");
+    const container = this.querySelector("#yaml-editor-container");
 
-    const layoutSchema = [
-      {
-        name: "layout_type",
-        label: "Type d'affichage",
-        selector: {
-          select: {
-            options: [
-              { value: "grid", label: "Grille (Grid)" },
-              { value: "horizontal-stack", label: "Pile Horizontale (Horizontal)" },
-              { value: "vertical-stack", label: "Pile Verticale (Vertical)" }
-            ]
-          }
-        }
-      },
-      {
-        name: "columns",
-        label: "Nombre de colonnes (Mode Grille)",
-        selector: {
-          number: {
-            min: 1,
-            max: 12,
-            mode: "box"
-          }
-        }
+    // Création de l'éditeur de code officiel de Home Assistant
+    this._yamlEditor = document.createElement("ha-code-editor");
+    this._yamlEditor.mode = "yaml";
+    this._yamlEditor.autocompleteEntities = true;
+    this._yamlEditor.autocompleteString = true;
+    
+    // On nettoie la config pour l'affichage de l'édition (on retire le type principal)
+    const { type, ...cleanConfig } = this._config;
+    // Utilisation de l'outil natif de HA pour transformer le JSON en chaîne YAML propre
+    this._yamlEditor.value = window.jsyaml ? window.jsyaml.dump(cleanConfig) : JSON.stringify(cleanConfig, null, 2);
+
+    this._yamlEditor.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
+      try {
+        // Transformation du YAML de l'utilisateur en objet JSON
+        const parsedConfig = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
+        
+        this.dispatchEvent(new CustomEvent("config-changed", {
+          detail: {
+            config: {
+              type: "custom:all-areas-display",
+              ...parsedConfig
+            }
+          },
+          bubbles: true,
+          composed: true,
+        }));
+      } catch (err) {
+        // On ne fait rien pendant que l'utilisateur écrit pour éviter de faire crasher l'interface
       }
-    ];
-
-    this._layoutFormElement.schema = layoutSchema;
-    this._updateFormValues();
-
-    this._layoutFormElement.addEventListener("value-changed", (ev) => {
-      const value = ev.detail.value;
-      const newConfig = {
-        ...this._config,
-        layout_type: value.layout_type || "grid",
-        layout_options: {
-          ...this._config.layout_options,
-          columns: value.columns || 2
-        }
-      };
-      this._fireConfigChanged(newConfig);
     });
 
-    try {
-      const helpers = await window.loadCardHelpers();
-      this._cardEditorElement = document.createElement("hui-card-element-editor");
-      this._cardEditorElement.hass = this._hass;
-      this._cardEditorElement.value = this._config.button_template || { type: "tile", name: "[[area_name]]" };
-
-      this._cardEditorElement.addEventListener("config-changed", (ev) => {
-        ev.stopPropagation();
-        const newConfig = {
-          ...this._config,
-          button_template: ev.detail.config
-        };
-        this._fireConfigChanged(newConfig);
-      });
-
-      editorContainer.appendChild(this._cardEditorElement);
-    } catch (err) {
-      console.error("Erreur sélecteur HA:", err);
-      editorContainer.innerHTML = `<p style="color:red;">Erreur de chargement de l'éditeur visuel.</p>`;
-    }
-  }
-
-  _updateFormValues() {
-    if (!this._layoutFormElement) return;
-    this._layoutFormElement.data = {
-      layout_type: this._config?.layout_type || "grid",
-      columns: this._config?.layout_options?.columns || 2
-    };
-  }
-
-  _fireConfigChanged(newConfig) {
-    this.dispatchEvent(new CustomEvent("config-changed", {
-      detail: { config: newConfig },
-      bubbles: true,
-      composed: true,
-    }));
+    container.appendChild(this._yamlEditor);
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
@@ -144,16 +94,16 @@ class AllAreasDisplay extends HTMLElement {
       type: "custom:all-areas-display",
       layout_type: "grid",
       layout_options: { columns: 2 },
-      button_template: {
+      card_template: {
         type: "tile",
         name: "[[area_name]]",
-        icon: "[[area_icon]]"
+        icon: "[[area_icon]]",
+        entity: "[[default_entity]]"
       }
     };
   }
 
   setConfig(config) {
-    // Suppression complète de l'ancienne vérification stricte "card_template"
     this._config = config;
   }
 
@@ -186,6 +136,7 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
+    // Préparation de la structure de mise en page globale
     const layoutConfig = {
       type: config.layout_type || 'grid',
       cards: []
@@ -196,8 +147,8 @@ class AllAreasDisplay extends HTMLElement {
       layoutConfig.square = false;
     }
 
-    // Sécurité si aucun template n'est encore enregistré
-    let templateToUse = config.button_template || { type: "tile", name: "[[area_name]]" };
+    // Récupération du template de carte personnalisé (clé card_template)
+    let templateToUse = config.card_template || { type: "tile", name: "[[area_name]]", entity: "[[default_entity]]" };
 
     areas.forEach(area => {
       const areaId = area.area_id;
@@ -205,7 +156,7 @@ class AllAreasDisplay extends HTMLElement {
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
-      // Recherche d'entité par défaut
+      // Algorithme d'entité par défaut (Lumière, puis interrupteur, puis soleil)
       let defaultEntity = "sun.sun"; 
       const lightEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('light.') && 
@@ -221,7 +172,7 @@ class AllAreasDisplay extends HTMLElement {
         if (switchEntity) defaultEntity = switchEntity.entity_id;
       }
 
-      // Capteurs Temp / Humidité
+      // Extraction des capteurs de température
       let areaTemp = "N/A";
       const tempEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
@@ -230,6 +181,7 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
 
+      // Extraction des capteurs d'humidité
       let areaHumidity = "N/A";
       const humEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
@@ -238,7 +190,7 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
 
-      // Remplacement propre des variables
+      // Remplacement dynamique textuel des variables
       const replaceVariables = (obj) => {
         let str = JSON.stringify(obj);
         str = str.replaceAll('[[area_id]]', areaId);
@@ -251,7 +203,11 @@ class AllAreasDisplay extends HTMLElement {
         return JSON.parse(str);
       };
 
-      layoutConfig.cards.push(replaceVariables(templateToUse));
+      try {
+        layoutConfig.cards.push(replaceVariables(templateToUse));
+      } catch (e) {
+        console.error("Erreur de traitement des variables YAML :", e);
+      }
     });
 
     try {
@@ -263,7 +219,7 @@ class AllAreasDisplay extends HTMLElement {
       this.content.appendChild(element);
       this._layoutElement = element;
     } catch (err) {
-      console.error("Erreur rendu:", err);
+      console.error("Erreur rendu conteneur principal :", err);
     }
   }
 
@@ -275,7 +231,7 @@ customElements.define('all-areas-display', AllAreasDisplay);
 
 
 // ==========================================
-// 3. ENREGISTREMENT CATALOGUE (OK LOVELACE)
+// 3. ENREGISTREMENT CATALOGUE
 // ==========================================
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
@@ -283,6 +239,6 @@ if (!window.customCards.some(c => c.type === 'all-areas-display')) {
     type: "all-areas-display",
     name: "All areas display",
     preview: true,
-    description: "Générateur automatique de tableaux de bord basés sur vos pièces Lovelace."
+    description: "Générateur automatique de cartes basé sur du YAML et vos pièces Lovelace."
   });
 }
