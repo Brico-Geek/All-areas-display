@@ -15,8 +15,7 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
-  // --- PETIT MOTEUR DE RENDU YAML LOCAL TRÈS ROBUSTE ---
-  // Il remplace jsyaml pour le dump et gère parfaitement l'indentation, les objets et les listes (-)
+  // --- PETIT MOTEUR DE RENDU YAML LOCAL CORRIGÉ ---
   _stringifyYaml(obj, depth = 0) {
     const indent = "  ".repeat(depth);
     
@@ -26,14 +25,24 @@ class AllAreasDisplayEditor extends HTMLElement {
       if (obj.length === 0) return " []";
       return "\n" + obj.map(item => {
         if (typeof item === 'object' && item !== null) {
-          // Pour un objet dans une liste, on indente le premier champ derrière le tiret
           const entries = Object.entries(item);
           if (entries.length === 0) return `${indent}- {}`;
-          const first = `${indent}- ${entries[0][0]}:${this._stringifyYaml(entries[0][1], depth + 1)}`;
-          const rest = entries.slice(1).map(([k, v]) => `${indent}  ${k}:${this._stringifyYaml(v, depth + 1)}`).join("\n");
+          
+          // Premier élément de l'objet aligné avec le tiret
+          const firstVal = this._stringifyYaml(entries[0][1], depth + 1);
+          const firstSep = firstVal.startsWith("\n") ? "" : " ";
+          const first = `${indent}- ${entries[0][0]}:${firstSep}${firstVal.trim()}`;
+          
+          // Les éléments suivants de l'objet doivent être décalés de 2 espaces supplémentaires
+          const rest = entries.slice(1).map(([k, v]) => {
+            const val = this._stringifyYaml(v, depth + 1);
+            const sep = val.startsWith("\n") ? "" : " ";
+            return `${indent}  ${k}:${sep}${val.trim()}`;
+          }).join("\n");
+          
           return rest ? `${first}\n${rest}` : first;
         }
-        return `${indent}- ${item}`;
+        return `${indent}- ${obj === '' ? '""' : item}`;
       }).join("\n");
     }
     
@@ -42,14 +51,13 @@ class AllAreasDisplayEditor extends HTMLElement {
       if (entries.length === 0) return " {}";
       const content = entries.map(([k, v]) => {
         const valueStr = this._stringifyYaml(v, depth + 1);
-        // Si la valeur commence par un retour à la ligne (objet/tableau imbriqué), pas besoin d'espace après le ":"
-        const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
-        return `${indent}${k}:${separator}${valueStr}`;
+        const separator = valueStr.startsWith("\n") ? "" : " ";
+        return `${indent}${k}:${separator}${valueStr.trim()}`;
       }).join("\n");
       return depth === 0 ? content : "\n" + content;
     }
     
-    // Protection pour les chaînes de caractères complexes ou vides
+    // Formatage et sécurisation des chaînes de caractères
     const str = String(obj);
     if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
       return `"${str.replace(/"/g, '\\"')}"`;
