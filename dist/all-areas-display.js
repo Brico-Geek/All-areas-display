@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR HYBRIDE (INTERFACE SIMPLE + YAML)
+// 1. L'ÉDITEUR HYBRIDE CORRIGÉ (PERSISTANCE DU YAML)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -18,6 +18,7 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   _render() {
+    // Si l'élément est déjà construit, on met juste à jour les valeurs pour éviter les resets globaux
     if (this._layoutFormElement) {
       this._updateFormValues();
       return;
@@ -33,7 +34,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         
         <h3 style="margin: 0; color: var(--primary-color);">2. Pièces à exclure (Bannir)</h3>
         <div style="font-size: 0.85em; color: var(--secondary-text-color); margin-bottom: 5px;">
-          Entrez les IDs ou les noms des pièces à masquer, séparés par des virgules (ex: garage, cellier) :
+          Entrez les IDs ou les noms des pièces à masquer (ex: garage, cellier) :
         </div>
         <ha-textfield id="exclude-input" style="width: 100%;" placeholder="garage, couloir, exterieur"></ha-textfield>
 
@@ -52,17 +53,15 @@ class AllAreasDisplayEditor extends HTMLElement {
     const container = this.querySelector("#yaml-editor-container");
     const excludeInput = this.querySelector("#exclude-input");
 
-    // Init champ exclusion
+    // Gestion du champ d'exclusion
     excludeInput.value = this._config.exclude_areas ? this._config.exclude_areas.join(', ') : '';
     excludeInput.addEventListener("change", (ev) => {
       const list = ev.target.value.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
-      this._fireConfigChanged({
-        ...this._config,
-        exclude_areas: list
-      });
+      this._config = { ...this._config, exclude_areas: list };
+      this._fireConfigChanged();
     });
 
-    // Formulaire visuel pour la mise en page
+    // Schéma de configuration de la mise en page
     const layoutSchema = [
       {
         name: "layout_type",
@@ -89,34 +88,55 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._layoutFormElement.schema = layoutSchema;
     this._updateFormValues();
 
+    // Écouteur du formulaire visuel
     this._layoutFormElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
-      this._fireConfigChanged({
+      this._config = {
         ...this._config,
         layout_type: value.layout_type || "grid",
         layout_options: {
           ...this._config.layout_options,
           columns: value.columns || 2
         }
-      });
+      };
+      this._fireConfigChanged();
     });
 
-    // Éditeur de code pour la carte
+    // Initialisation robuste de l'éditeur de code YAML
     this._yamlEditor = document.createElement("ha-code-editor");
     this._yamlEditor.mode = "yaml";
     
+    // On extrait le template existant ou on applique une structure de départ propre
     const cardTemplate = this._config.card_template || { type: "tile" };
-    this._yamlEditor.value = window.jsyaml ? window.jsyaml.dump(cardTemplate) : JSON.stringify(cardTemplate, null, 2);
+    
+    // Conversion en YAML propre via la librairie de Home Assistant ou fallback JSON
+    if (window.jsyaml) {
+      this._yamlEditor.value = window.jsyaml.dump(cardTemplate);
+    } else {
+      this._yamlEditor.value = JSON.stringify(cardTemplate, null, 2);
+    }
 
+    // Écouteur de modifications sur l'éditeur de code
     this._yamlEditor.addEventListener("value-changed", (ev) => {
-      ev.stopPropagation();
+      ev.stopPropagation(); // Évite les boucles infinies d'événements HA
       try {
-        const parsedCard = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
-        this._fireConfigChanged({
+        let parsedCard;
+        if (window.jsyaml) {
+          parsedCard = window.jsyaml.load(ev.detail.value);
+        } else {
+          parsedCard = JSON.parse(ev.detail.value);
+        }
+        
+        // On met à jour la configuration locale de l'éditeur
+        this._config = {
           ...this._config,
           card_template: parsedCard
-        });
-      } catch (err) {}
+        };
+        
+        this._fireConfigChanged();
+      } catch (err) {
+        // En cours de saisie, le YAML peut être invalide, on ignore pour éviter le crash
+      }
     });
 
     container.appendChild(this._yamlEditor);
@@ -130,9 +150,9 @@ class AllAreasDisplayEditor extends HTMLElement {
     };
   }
 
-  _fireConfigChanged(newConfig) {
+  _fireConfigChanged() {
     this.dispatchEvent(new CustomEvent("config-changed", {
-      detail: { config: newConfig },
+      detail: { config: this._config },
       bubbles: true,
       composed: true,
     }));
@@ -156,9 +176,7 @@ class AllAreasDisplay extends HTMLElement {
       layout_options: { columns: 2 },
       exclude_areas: [],
       card_template: {
-        type: "tile",
-        entity: "",
-        name: ""
+        type: "tile"
       }
     };
   }
@@ -192,7 +210,7 @@ class AllAreasDisplay extends HTMLElement {
     let areas = Object.values(hass.areas || {});
     const excludeList = config.exclude_areas || [];
 
-    // Filtrer les pièces bannies (par ID ou par Nom)
+    // Filtrer les pièces exclues
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
       const nameMatch = area.name ? excludeList.includes(area.name.toLowerCase()) : false;
@@ -222,7 +240,7 @@ class AllAreasDisplay extends HTMLElement {
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
-      // Recherche des entités par défaut
+      // Entité par défaut
       let defaultEntity = "sun.sun"; 
       const lightEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('light.') && hass.entities[state.entity_id]?.area_id === areaId
@@ -254,7 +272,6 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
 
-      // Création du dictionnaire de données de la pièce actuelle
       const areaData = {
         id: areaId,
         name: areaName,
@@ -265,16 +282,14 @@ class AllAreasDisplay extends HTMLElement {
         humidity: areaHumidity
       };
 
-      // Remplacement récursif basé sur "this.area.xxx" ou les valeurs vides
+      // Injection des variables et fallbacks intelligents
       const processCard = (obj) => {
         let copy = JSON.parse(JSON.stringify(obj));
 
-        // 1. Gestion des valeurs vides ou manquantes (Comportement intelligent demandé)
         if (!copy.hasOwnProperty('entity') || copy.entity === "") copy.entity = areaData.entity;
         if (!copy.hasOwnProperty('name') || copy.name === "") copy.name = areaData.name;
         if (!copy.hasOwnProperty('icon') || copy.icon === "") copy.icon = areaData.icon;
 
-        // 2. Remplacement des expressions "this.area.xxx" partout dans l'objet
         let str = JSON.stringify(copy);
         str = str.replaceAll('this.area.id', areaData.id);
         str = str.replaceAll('this.area.name', areaData.name);
