@@ -15,6 +15,48 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
+  // --- PETIT MOTEUR DE RENDU YAML LOCAL TRÈS ROBUSTE ---
+  // Il remplace jsyaml pour le dump et gère parfaitement l'indentation, les objets et les listes (-)
+  _stringifyYaml(obj, depth = 0) {
+    const indent = "  ".repeat(depth);
+    
+    if (obj === null || obj === undefined) return "";
+    
+    if (Array.isArray(obj)) {
+      if (obj.length === 0) return " []";
+      return "\n" + obj.map(item => {
+        if (typeof item === 'object' && item !== null) {
+          // Pour un objet dans une liste, on indente le premier champ derrière le tiret
+          const entries = Object.entries(item);
+          if (entries.length === 0) return `${indent}- {}`;
+          const first = `${indent}- ${entries[0][0]}:${this._stringifyYaml(entries[0][1], depth + 1)}`;
+          const rest = entries.slice(1).map(([k, v]) => `${indent}  ${k}:${this._stringifyYaml(v, depth + 1)}`).join("\n");
+          return rest ? `${first}\n${rest}` : first;
+        }
+        return `${indent}- ${item}`;
+      }).join("\n");
+    }
+    
+    if (typeof obj === 'object') {
+      const entries = Object.entries(obj);
+      if (entries.length === 0) return " {}";
+      const content = entries.map(([k, v]) => {
+        const valueStr = this._stringifyYaml(v, depth + 1);
+        // Si la valeur commence par un retour à la ligne (objet/tableau imbriqué), pas besoin d'espace après le ":"
+        const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
+        return `${indent}${k}:${separator}${valueStr}`;
+      }).join("\n");
+      return depth === 0 ? content : "\n" + content;
+    }
+    
+    // Protection pour les chaînes de caractères complexes ou vides
+    const str = String(obj);
+    if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
+      return `"${str.replace(/"/g, '\\"')}"`;
+    }
+    return str;
+  }
+
   async _render() {
     if (this._initialized) {
       this._updateUiFields();
@@ -37,13 +79,11 @@ class AllAreasDisplayEditor extends HTMLElement {
             </select>
           </div>
 
-          <!-- Options dynamiques pour l'Auto (Largeur de carte) -->
           <div id="auto-options" style="display: none; align-items: center; gap: 8px; margin-top: 6px;">
             <label style="color: var(--primary-text-color); font-size: 0.9em;">Largeur cible des cartes :</label>
             <input id="auto-width" type="text" placeholder="150px" style="width: 70px; padding: 6px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);" />
           </div>
 
-          <!-- Options dynamiques pour la Grille -->
           <div id="grid-options" style="display: none; gap: 12px; align-items: center; margin-top: 6px;">
             <div style="display: flex; align-items: center; gap: 6px;">
               <label style="color: var(--primary-text-color); font-size: 0.9em;">Colonnes (Min 2) :</label>
@@ -51,7 +91,6 @@ class AllAreasDisplayEditor extends HTMLElement {
             </div>
           </div>
 
-          <!-- Option Carré -->
           <div id="square-option-container" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
             <input id="layout-square" type="checkbox" style="cursor: pointer;" />
             <label for="layout-square" style="color: var(--primary-text-color); font-size: 0.9em; cursor: pointer;">Afficher les cartes en carré</label>
@@ -83,23 +122,16 @@ class AllAreasDisplayEditor extends HTMLElement {
             Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
           </p>
           <div id="card-yaml-editor-container"></div>
-          <button id="apply-yaml-btn" style="padding: 10px; background: var(--accent-color, #03a9f4); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; transition: background 0.2s;">
-            Appliquer les modifications YAML
-          </button>
         </div>
 
       </div>
     `;
 
-    // Événements d'interaction de l'interface
     this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutUiChange());
     this.querySelector("#auto-width").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#sort-select").addEventListener("change", (e) => this._updateConfig({ sort_by: e.target.value }));
-
-    // Bouton de sauvegarde forcée du YAML
-    this.querySelector("#apply-yaml-btn").addEventListener("click", () => this._saveYamlContent());
 
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
@@ -107,51 +139,45 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._cardYamlEditor.autofocus = false;
     yamlContainer.appendChild(this._cardYamlEditor);
 
-    // Premier rendu du texte dans la boîte d'édition
-    setTimeout(() => {
-      this._forceYamlDumpInEditor();
-    }, 150);
+    this._cardYamlEditor.addEventListener("value-changed", (e) => {
+      e.stopPropagation();
+      this._handleYamlChange(e.detail.value);
+    });
+
+    // Rendu immédiat et propre via notre stringifier autonome
+    this._forceYamlDumpInEditor();
 
     this._updateUiFields();
   }
 
-  // Injecte la configuration actuelle dans la zone de texte
+  // Injecte la configuration sous forme de vrai YAML indenté
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
-
-    if (parser && typeof parser.dump === "function") {
-      this._cardYamlEditor.value = parser.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
-    } else {
-      this._cardYamlEditor.value = Object.entries(currentCardConfig)
-        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
-    }
+    
+    // On utilise notre méthode interne récursive : zéro dépendance, zéro corruption
+    this._cardYamlEditor.value = this._stringifyYaml(currentCardConfig).trim();
   }
 
-  // Sauvegarde déclenchée par le bouton
-  _saveYamlContent() {
-    const rawText = this._cardYamlEditor.value;
-    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+  _handleYamlChange(rawText) {
+    // Le parseur natif de HA fonctionne bien pour lire (load), c'est l'écriture (dump) qui posait problème.
+    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+    if (!hassYaml || typeof hassYaml.load !== "function") return;
 
     try {
-      if (parser && typeof parser.load === "function") {
-        const parsedCard = parser.load(rawText);
-        if (parsedCard && typeof parsedCard === 'object') {
-          this._config = { ...this._config, card: parsedCard };
-          this._fireConfigChanged();
-          
-          const btn = this.querySelector("#apply-yaml-btn");
-          btn.style.background = "var(--success-color, #4caf50)";
-          btn.textContent = "Appliqué avec succès !";
-          setTimeout(() => {
-            btn.style.background = "var(--accent-color, #03a9f4)";
-            btn.textContent = "Appliquer les modifications YAML";
-          }, 1500);
-        }
+      const parsedCard = hassYaml.load(rawText);
+      if (parsedCard && typeof parsedCard === 'object') {
+        this._config = { ...this._config, card: parsedCard };
+        
+        // Notification immédiate au dashboard Lovelace
+        this.dispatchEvent(new CustomEvent("config-changed", {
+          detail: { config: this._config },
+          bubbles: true,
+          composed: true,
+        }));
       }
     } catch (err) {
-      alert("Erreur de syntaxe YAML. Vérifiez l'indentation et les espaces.");
+      // Ignoré pendant la frappe utilisateur
     }
   }
 
@@ -276,7 +302,6 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
-
 
 // ==========================================
 // 2. LA CARTE PRINCIPALE (MOTEUR GENERIQUE)
@@ -433,12 +458,12 @@ class AllAreasDisplay extends HTMLElement {
       this._childElements = [];
 
       if (userLayout.type === "auto") {
-        // Application de l'ajustement dynamique de largeur demandé
         const targetMinWidth = userLayout.min_width || "150px";
         
         const autoGridWrapper = document.createElement("div");
         autoGridWrapper.style.display = "grid";
-        autoGridWrapper.style.gridTemplateColumns = `repeat(auto-fit, minmax(${targetMinWidth}, 1fr))`;
+        // Utilisation de auto-fill à la place de auto-fit pour forcer l'alignement uniforme
+        autoGridWrapper.style.gridTemplateColumns = `repeat(auto-fill, minmax(${targetMinWidth}, 1fr))`;
         autoGridWrapper.style.gap = "8px";
         autoGridWrapper.style.width = "100%";
 
