@@ -78,16 +78,13 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
     
-    // Forçage du rendu en vrai YAML via le parseur interne de Home Assistant si jsyaml manque
     const initialCardConfig = this._config.card || { type: "area", area: "this.area.id" };
     const hassYamlParser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze; 
     
+    // Indentation forcée à 2 espaces pour une lecture parfaite
     if (hassYamlParser && typeof hassYamlParser.dump === "function") {
-      this._cardYamlEditor.value = hassYamlParser.dump(initialCardConfig);
-    } else if (window.DumpYaml) {
-      this._cardYamlEditor.value = window.DumpYaml(initialCardConfig);
+      this._cardYamlEditor.value = hassYamlParser.dump(initialCardConfig, { indent: 2 });
     } else {
-      // Fallback ultime au cas où HA tarde à exposer son parser au démarrage
       this._cardYamlEditor.value = Object.entries(initialCardConfig)
         .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
     }
@@ -99,12 +96,13 @@ class AllAreasDisplayEditor extends HTMLElement {
         if (loadParser && typeof loadParser.load === "function") {
           const parsedCard = loadParser.load(ev.detail.value);
           if (parsedCard && typeof parsedCard === 'object') {
-            this._config.card = parsedCard;
+            // Création d'une nouvelle référence d'objet pour forcer la mise à jour de l'aperçu
+            this._config = { ...this._config, card: parsedCard };
             this._fireConfigChanged();
           }
         }
       } catch (err) {
-        // Silencieux pendant l'édition
+        // Silencieux pendant l'écriture incomplète du YAML
       }
     });
 
@@ -124,7 +122,6 @@ class AllAreasDisplayEditor extends HTMLElement {
     } else if (selectType === "auto") {
       newLayout = { type: "auto" };
     } else if (selectType === "grid") {
-      // Limite forcée à 2 colonnes minimum en JS
       const inputCols = parseInt(this.querySelector("#grid-columns").value) || 2;
       const cols = Math.max(2, inputCols);
       newLayout = { type: "grid", columns: cols };
@@ -243,13 +240,19 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   setConfig(config) {
+    // Stringify pour détecter si la structure globale ou le sous-YAML a changé
+    const oldConfigStr = this._configStr;
+    this._configStr = JSON.stringify(config);
     this._config = config;
+
+    // Si la config change dans l'éditeur, on casse la clé de rendu pour forcer l'actualisation immédiate
+    if (oldConfigStr && oldConfigStr !== this._configStr) {
+      this._renderedKey = null;
+    }
   }
 
   set hass(hass) {
-    const oldHass = this._hass;
     this._hass = hass;
-    
     if (!this._config) return;
 
     if (!this.content) {
@@ -257,33 +260,40 @@ class AllAreasDisplay extends HTMLElement {
       this.content = this.querySelector('#card-container');
     }
 
-    // Évite les re-générations inutiles qui provoquent des clignotements d'états
-    if (this._layoutElement && oldHass && JSON.stringify(oldHass.areas) === JSON.stringify(hass.areas) && oldHass.states === hass.states) {
-      this._layoutElement.hass = hass;
+    // Extraction et filtrage des pièces
+    let areas = Object.values(hass.areas || {});
+    const excludeList = (this._config.exclude || []).map(item => String(item).toLowerCase());
+    areas = areas.filter(area => {
+      const idMatch = excludeList.includes(area.area_id.toLowerCase());
+      const nameMatch = area.name ? excludeList.includes(area.name.toLowerCase()) : false;
+      return !idMatch && !nameMatch;
+    }).sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+    // Clé unique basée sur la configuration et la liste des pièces générées
+    const currentRenderKey = `${this._configStr}-${areas.map(a => a.area_id).join(',')}`;
+
+    // ANTI-BOUCLE BUBBLE CARD : Si la structure n'a pas fondamentalement bougé,
+    // on ne touche JAMAIS au DOM. On injecte juste le hass frais aux cartes enfants existantes.
+    if (this._renderedKey === currentRenderKey && this._childElements) {
+      this._childElements.forEach(el => {
+        if (el && el.hass !== hass) el.hass = hass;
+      });
       return;
     }
 
-    this._buildContainer();
+    this._buildContainer(areas, currentRenderKey);
   }
 
-  async _buildContainer() {
-    // Verrou antirebond pour tuer définitivement le double affichage asynchrone
+  async _buildContainer(areas, currentRenderKey) {
     if (this._building) return;
     this._building = true;
 
     const config = this._config;
     const hass = this._hass;
-    let areas = Object.values(hass.areas || {});
-    
-    const excludeList = (config.exclude || []).map(item => String(item).toLowerCase());
-    areas = areas.filter(area => {
-      const idMatch = excludeList.includes(area.area_id.toLowerCase());
-      const nameMatch = area.name ? excludeList.includes(area.name.toLowerCase()) : false;
-      return !idMatch && !nameMatch;
-    });
 
     if (areas.length === 0) {
       this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce à afficher.</ha-alert>`;
+      this._renderedKey = currentRenderKey;
       this._building = false;
       return;
     }
@@ -360,12 +370,10 @@ class AllAreasDisplay extends HTMLElement {
 
     try {
       const helpers = await window.loadCardHelpers();
-      
-      // On vide le conteneur juste avant l'écriture finale pour tuer les doublons éphémères
       this.content.innerHTML = '';
+      this._childElements = [];
 
       if (userLayout.type === "auto") {
-        // Grid CSS natif à taille homogène et adaptative
         const autoGridWrapper = document.createElement("div");
         autoGridWrapper.style.display = "grid";
         autoGridWrapper.style.gridTemplateColumns = "repeat(auto-fit, minmax(150px, 1fr))";
@@ -379,13 +387,12 @@ class AllAreasDisplay extends HTMLElement {
             cardEl.style.aspectRatio = "1 / 1";
           }
           autoGridWrapper.appendChild(cardEl);
+          this._childElements.push(cardEl);
         }
         
         this.content.appendChild(autoGridWrapper);
-        this._layoutElement = autoGridWrapper;
 
       } else {
-        // Logique Grid Lovelace standard forcée à 2 colonnes minimum
         const finalLayout = { ...userLayout };
         if (finalLayout.type === "grid" && finalLayout.columns) {
           finalLayout.columns = Math.max(2, finalLayout.columns);
@@ -396,8 +403,20 @@ class AllAreasDisplay extends HTMLElement {
         element.hass = hass;
         
         this.content.appendChild(element);
-        this._layoutElement = element;
+        
+        // Attente que le conteneur Lovelace injecte ses propres enfants pour les référencer
+        setTimeout(() => {
+          if (element.shadowRoot) {
+            this._childElements = Array.from(element.shadowRoot.querySelectorAll("*"));
+          } else {
+            this._childElements = Array.from(element.querySelectorAll("*"));
+          }
+        }, 50);
       }
+
+      // Validation de la clé de rendu pour bloquer les futures exécutions
+      this._renderedKey = currentRenderKey;
+
     } catch (err) {
       console.error("Erreur de rendu du container principal :", err);
     } finally {
