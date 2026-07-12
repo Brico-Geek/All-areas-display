@@ -4,7 +4,7 @@
 class AllAreasDisplayEditor extends HTMLElement {
   constructor() {
     super();
-    this._isInternalUpdate = false; // Le verrou pour stopper la boucle
+    this._isInternalUpdate = false; // Verrou pour stopper la boucle
   }
 
   setConfig(config) {
@@ -20,41 +20,32 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
-  // --- MOTEUR DE RENDU YAML LOCAL ---
-  _stringifyYaml(obj, depth = 0) {
-    const indent = "  ".repeat(depth);
-    if (obj === null || obj === undefined) return "";
+  // Force la mise à jour sans déclencher la boucle de l'éditeur
+  _forceYamlDumpInEditor() {
+    if (!this._cardYamlEditor) return;
+    this._isInternalUpdate = true; // Verrouillage
     
-    if (Array.isArray(obj)) {
-      if (obj.length === 0) return " []";
-      return "\n" + obj.map(item => {
-        if (typeof item === 'object' && item !== null) {
-          const entries = Object.entries(item);
-          if (entries.length === 0) return `${indent}- {}`;
-          const first = `${indent}- ${entries[0][0]}:${this._stringifyYaml(entries[0][1], depth + 1)}`;
-          const rest = entries.slice(1).map(([k, v]) => `${indent}  ${k}:${this._stringifyYaml(v, depth + 1)}`).join("\n");
-          return rest ? `${first}\n${rest}` : first;
-        }
-        return `${indent}- ${item}`;
-      }).join("\n");
+    const yaml = window.jsyaml;
+    if (yaml && yaml.dump) {
+      const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
+      this._cardYamlEditor.value = yaml.dump(currentCardConfig);
     }
     
-    if (typeof obj === 'object') {
-      const entries = Object.entries(obj);
-      if (entries.length === 0) return " {}";
-      const content = entries.map(([k, v]) => {
-        const valueStr = this._stringifyYaml(v, depth + 1);
-        const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
-        return `${indent}${k}:${separator}${valueStr}`;
-      }).join("\n");
-      return depth === 0 ? content : "\n" + content;
-    }
-    
-    const str = String(obj);
-    if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
-      return `"${str.replace(/"/g, '\\"')}"`;
-    }
-    return str;
+    setTimeout(() => { this._isInternalUpdate = false; }, 100); // Déverrouillage après 100ms
+  }
+
+  _handleYamlChange(rawText) {
+    if (this._isInternalUpdate) return; // Si c'est le système qui écrit, on ignore
+
+    const yaml = window.jsyaml;
+    if (!yaml || typeof yaml.load !== "function") return;
+
+    try {
+      const parsedCard = yaml.load(rawText);
+      if (parsedCard && typeof parsedCard === 'object') {
+        this._updateConfig({ card: parsedCard });
+      }
+    } catch (err) { /* Ignorer les erreurs de frappe */ }
   }
 
   async _render() {
@@ -86,7 +77,6 @@ class AllAreasDisplayEditor extends HTMLElement {
       </div>
     `;
 
-    // Écouteurs UI
     this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutUiChange());
     this.querySelector("#auto-width").addEventListener("change", () => this._handleLayoutUiChange());
@@ -106,48 +96,28 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateUiFields();
   }
 
-  // Force la mise à jour sans déclencher la boucle
-  _forceYamlDumpInEditor() {
-    if (!this._cardYamlEditor) return;
-    this._isInternalUpdate = true; // ACTIVER LE VERROU
-    
-    const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    this._cardYamlEditor.value = this._stringifyYaml(currentCardConfig).trim();
-    
-    // Débloquer après un court délai pour permettre les futures entrées utilisateur
-    setTimeout(() => { this._isInternalUpdate = false; }, 100);
-  }
-
-  _handleYamlChange(rawText) {
-    // Si c'est une mise à jour interne (forceYamlDump), on ignore
-    if (this._isInternalUpdate) return;
-
-    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
-    if (!hassYaml || typeof hassYaml.load !== "function") return;
-
-    try {
-      const parsedCard = hassYaml.load(rawText);
-      if (parsedCard && typeof parsedCard === 'object') {
-        this._config = { ...this._config, card: parsedCard };
-        this.dispatchEvent(new CustomEvent("config-changed", {
-          detail: { config: this._config },
-          bubbles: true,
-          composed: true,
-        }));
-      }
-    } catch (err) { /* Ignorer les erreurs pendant la frappe */ }
-  }
-
-  // ... (Garder vos méthodes _updateUiFields, _handleLayoutUiChange, _updateExcludedCheckboxes, _updateConfig, _fireConfigChanged identiques)
-  _updateUiFields() { /* ... votre logique actuelle ... */ }
-  _handleLayoutUiChange() { /* ... votre logique actuelle ... */ }
-  _updateExcludedCheckboxes() { /* ... votre logique actuelle ... */ }
   _updateConfig(newProps) { 
     this._config = { ...this._config, ...newProps }; 
-    this._forceYamlDumpInEditor(); // Mettre à jour le YAML quand l'UI change
+    // On met à jour l'UI sans forcer le YAML si c'est déjà une modif venant de l'éditeur
     this._fireConfigChanged(); 
   }
-  _fireConfigChanged() { /* ... */ }
+
+  _fireConfigChanged() {
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: this._config },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  // --- MANTENIR VOS MÉTHODES EXISTANTES ---
+  _updateUiFields() { /* Votre logique existante */ }
+  _handleLayoutUiChange() { 
+      // Après modif UI, on force la mise à jour du YAML
+      this._forceYamlDumpInEditor();
+      this._fireConfigChanged();
+  }
+  _updateExcludedCheckboxes() { /* Votre logique existante */ }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
