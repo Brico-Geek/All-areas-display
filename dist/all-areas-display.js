@@ -116,7 +116,7 @@ class AllAreasDisplayEditor extends HTMLElement {
     container.innerHTML = "";
     areas.sort((a, b) => (a.name || "").localeCompare(b.name || "")).forEach(area => {
       const label = document.createElement("label");
-      label style.display = "flex";
+      label.style.display = "flex";
       label.style.alignItems = "center";
       label.style.gap = "8px";
       label.style.color = "var(--primary-text-color)";
