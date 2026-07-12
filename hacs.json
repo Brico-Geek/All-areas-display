@@ -1,0 +1,6 @@
+{
+  "name": "All areas display",
+  "content_type": "plugin",
+  "filename": "all-areas-display.js",
+  "render_readme": true
+}
