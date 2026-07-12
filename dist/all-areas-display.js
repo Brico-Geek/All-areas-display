@@ -15,7 +15,7 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
-  // --- PETIT MOTEUR DE RENDU YAML LOCAL CORRIGÉ ---
+  // --- RENDU YAML CORRIGÉ (PROBLÈME DE COLONNE ET D'ESPACE) ---
   _stringifyYaml(obj, depth = 0) {
     const indent = "  ".repeat(depth);
     
@@ -28,21 +28,24 @@ class AllAreasDisplayEditor extends HTMLElement {
           const entries = Object.entries(item);
           if (entries.length === 0) return `${indent}- {}`;
           
-          // Premier élément de l'objet aligné avec le tiret
-          const firstVal = this._stringifyYaml(entries[0][1], depth + 1);
-          const firstSep = firstVal.startsWith("\n") ? "" : " ";
-          const first = `${indent}- ${entries[0][0]}:${firstSep}${firstVal.trim()}`;
-          
-          // Les éléments suivants de l'objet doivent être décalés de 2 espaces supplémentaires
-          const rest = entries.slice(1).map(([k, v]) => {
+          // On traite chaque propriété de l'objet dans le tableau
+          return entries.map(([k, v], idx) => {
             const val = this._stringifyYaml(v, depth + 1);
-            const sep = val.startsWith("\n") ? "" : " ";
-            return `${indent}  ${k}:${sep}${val.trim()}`;
+            // Sécurité : si la valeur commence par un saut de ligne (sous-objet), pas d'espace.
+            // Sinon, on FORCE un espace après les deux-points, sans exception.
+            const sep = (val.startsWith("\n") || val.startsWith(" ")) ? "" : " ";
+            
+            if (idx === 0) {
+              // Le premier élément porte le tiret de la liste
+              return `${indent}- ${k}:${sep}${val.trim()}`;
+            } else {
+              // Les éléments suivants sont alignés verticalement sous la première clé
+              return `${indent}  ${k}:${sep}${val.trim()}`;
+            }
           }).join("\n");
-          
-          return rest ? `${first}\n${rest}` : first;
         }
-        return `${indent}- ${obj === '' ? '""' : item}`;
+        // Pour les tableaux de valeurs simples
+        return `${indent}- ${item === '' ? '""' : item}`;
       }).join("\n");
     }
     
@@ -51,13 +54,13 @@ class AllAreasDisplayEditor extends HTMLElement {
       if (entries.length === 0) return " {}";
       const content = entries.map(([k, v]) => {
         const valueStr = this._stringifyYaml(v, depth + 1);
-        const separator = valueStr.startsWith("\n") ? "" : " ";
+        const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
         return `${indent}${k}:${separator}${valueStr.trim()}`;
       }).join("\n");
       return depth === 0 ? content : "\n" + content;
     }
     
-    // Formatage et sécurisation des chaînes de caractères
+    // Protection et formatage des chaînes
     const str = String(obj);
     if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
       return `"${str.replace(/"/g, '\\"')}"`;
