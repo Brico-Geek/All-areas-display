@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR AVANCÉ ET STABLE
+// 1. L'ÉDITEUR DE CONFINEMENT ET DE CONFIGURATION
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -14,7 +14,7 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   _render() {
     if (this.querySelector("#layout-form")) {
-      this._updateFormSchema();
+      this._updateEditorValue();
       return;
     }
 
@@ -29,20 +29,28 @@ class AllAreasDisplayEditor extends HTMLElement {
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
         <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Configuration du Modèle Unique</h3>
-          <p style="margin: 0 0 10px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Colle ici le code de ton bouton ou de ta popup Bubble Card (récupéré via l'éditeur de code d'une carte normale). Les modifications s'appliqueront instantanément à toutes les pièces.
+          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Code du composant à dupliquer</h3>
+          <p style="margin: 0 0 12px 0; font-size: 0.85em; color: var(--secondary-text-color);">
+            Colle le YAML de ton bouton ou de ta popup ci-dessous. Modifie les lignes avec les variables magiques pour qu'elles s'adaptent à chaque pièce.
           </p>
 
-          <!-- Zone de boutons d'insertion rapide -->
-          <div style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; background: var(--secondary-background-color); padding: 8px; border-radius: 6px;">
-            <span style="font-size: 0.8em; align-self: center; margin-right: 4px; font-weight: bold;">Variables :</span>
-            <button class="v-btn" data-v="[[area_name]]" style="font-size:0.75em; padding:4px 8px; cursor:pointer; border-radius:4px; background: var(--primary-color); color: white; border: none;">Nom Pièce</button>
-            <button class="v-btn" data-v="[[area_icon]]" style="font-size:0.75em; padding:4px 8px; cursor:pointer; border-radius:4px; background: var(--primary-color); color: white; border: none;">Icône</button>
-            <button class="v-btn" data-v="[[default_entity]]" style="font-size:0.75em; padding:4px 8px; cursor:pointer; border-radius:4px; background: var(--primary-color); color: white; border: none;">Entité Auto</button>
+          <!-- Palette complète de variables magiques -->
+          <div style="margin-bottom: 12px; background: var(--secondary-background-color); padding: 10px; border-radius: 6px; border: 1px solid var(--divider-color);">
+            <div style="font-size: 0.8em; font-weight: bold; margin-bottom: 8px; color: var(--primary-text-color);">
+              Clique sur une variable pour l'insérer à la position du curseur :
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variables-palette">
+              <button class="v-btn" data-v="[[area_name]]" style="font-size:0.75em; padding:5px 8px; cursor:pointer; border-radius:4px; background: var(--primary-color); color: white; border: none; font-weight:500;">Nom Pièce</button>
+              <button class="v-btn" data-v="[[area_icon]]" style="font-size:0.75em; padding:5px 8px; cursor:pointer; border-radius:4px; background: var(--primary-color); color: white; border: none; font-weight:500;">Icône</button>
+              <button class="v-btn" data-v="[[area_id]]" style="font-size:0.75em; padding:5px 8px; cursor:pointer; border-radius:4px; background: var(--primary-color); color: white; border: none; font-weight:500;">ID Zone</button>
+              <button class="v-btn" data-v="[[area_slug]]" style="font-size:0.75em; padding:5px 8px; cursor:pointer; border-radius:4px; background: var(--primary-color); color: white; border: none; font-weight:500;">Slug (ID_minuscule)</button>
+              <button class="v-btn" data-v="[[default_entity]]" style="font-size:0.75em; padding:5px 8px; cursor:pointer; border-radius:4px; background: var(--disabled-text-color); color: white; border: none; font-weight:500; background-color: #e67e22;">Lumière/Switch Auto</button>
+              <button class="v-btn" data-v="[[area_temp]]" style="font-size:0.75em; padding:5px 8px; cursor:pointer; border-radius:4px; background: #2ecc71; color: white; border: none; font-weight:500;">Capteur Temp</button>
+              <button class="v-btn" data-v="[[area_humidity]]" style="font-size:0.75em; padding:5px 8px; cursor:pointer; border-radius:4px; background: #3498db; color: white; border: none; font-weight:500;">Capteur Humidité</button>
+            </div>
           </div>
           
-          <!-- Éditeur de code robuste intégré -->
+          <!-- Éditeur de code natif synchronisé -->
           <div style="border: 1px solid var(--divider-color); border-radius: 6px; overflow: hidden;">
             <ha-code-editor id="code-editor" mode="yaml" autocomplete></ha-code-editor>
           </div>
@@ -53,8 +61,9 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._formElement = this.querySelector("#layout-form");
     this._codeEditor = this.querySelector("#code-editor");
 
-    // Événement de mise en page
+    // Écouteur pour la mise en page (Grid, Stack, etc.)
     this._formElement.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
       const value = ev.detail.value;
       const newConfig = {
         ...this._config,
@@ -66,29 +75,44 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._fireConfigChanged(newConfig);
     });
 
-    // Événement de modification du code YAML du modèle unique
+    // Écouteur de l'éditeur de code avec sauvegarde dans le YAML parent de la carte
     this._codeEditor.addEventListener("value-changed", (ev) => {
       ev.stopPropagation();
+      const rawValue = ev.detail.value;
+      
       try {
-        // Transformation du texte YAML en objet JavaScript propre
-        const parsedCard = window.jsyaml.load(ev.detail.value);
+        // On convertit le texte YAML écrit en objet JS propre pour la config de HA
+        const parsedCard = window.jsyaml.load(rawValue);
         if (parsedCard && typeof parsedCard === 'object') {
-          this._fireConfigChanged({
+          const newConfig = {
             ...this._config,
             template_card: parsedCard
-          });
+          };
+          this._fireConfigChanged(newConfig);
         }
       } catch (e) {
-        // Évite de crasher pendant que l'utilisateur écrit
+        // Ne rien faire pendant que l'utilisateur tape pour éviter les sauts de curseur
       }
     });
 
-    // Gestion des boutons de variables magiques
-    this.querySelectorAll(".v-btn").forEach(btn => {
-      btn.addEventListener("click", () => {
-        navigator.clipboard.writeText(btn.getAttribute("data-v"));
-        alert(`Copié : ${btn.getAttribute("data-v")}\nColle-le à l'endroit voulu dans le champ de texte ci-dessous.`);
-      });
+    // Insertion intelligente au curseur lors du clic sur une variable
+    this.querySelector("#variables-palette").addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".v-btn");
+      if (!btn) return;
+      
+      const variable = btn.getAttribute("data-v");
+      const editor = this._codeEditor.codemirror || this._codeEditor._shadowRoot?.querySelector("textarea") || this._codeEditor;
+      
+      if (this._codeEditor.codemirror) {
+        // Si CodeMirror est accessible directement
+        const doc = this._codeEditor.codemirror.getDoc();
+        const cursor = doc.getCursor();
+        doc.replaceRange(variable, cursor);
+      } else {
+        // Fallback presse-papier classique si l'instance shadow est verrouillée
+        navigator.clipboard.writeText(variable);
+        alert(`Copié : ${variable}\nColle-le à l'emplacement souhaité dans l'éditeur.`);
+      }
     });
 
     this._updateFormSchema();
@@ -101,12 +125,12 @@ class AllAreasDisplayEditor extends HTMLElement {
     const schema = [
       {
         name: "layout_type",
-        label: "Disposition",
+        label: "Disposition globale",
         type: "select",
         options: [
           ["grid", "Grille (Grid)"],
-          ["horizontal-stack", "Horizontal"],
-          ["vertical-stack", "Vertical"]
+          ["horizontal-stack", "Horizontal (Stack)"],
+          ["vertical-stack", "Vertical (Stack)"]
         ]
       }
     ];
@@ -127,15 +151,19 @@ class AllAreasDisplayEditor extends HTMLElement {
       columns: this._config?.layout_options?.columns || 2
     };
 
-    // Charger la configuration existante dans l'éditeur de texte
-    if (this._codeEditor && this._config?.template_card) {
-      setTimeout(() => {
-        const yamlStr = window.jsyaml.dump(this._config.template_card);
-        if (this._codeEditor.value !== yamlStr) {
-          this._codeEditor.value = yamlStr;
-        }
-      }, 50);
-    }
+    this._updateEditorValue();
+  }
+
+  // Permet d'injecter la configuration de manière stable dans l'éditeur sans perdre le focus
+  _updateEditorValue() {
+    if (!this._codeEditor || !this._config?.template_card) return;
+    
+    try {
+      const yamlStr = window.jsyaml.dump(this._config.template_card);
+      if (this._codeEditor.value !== yamlStr) {
+        this._codeEditor.value = yamlStr;
+      }
+    } catch(e) {}
   }
 
   _fireConfigChanged(newConfig) {
@@ -150,7 +178,7 @@ customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. RENDU ET FILTRAGE DES PIÈCES ACTIVES
+// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -202,7 +230,7 @@ class AllAreasDisplay extends HTMLElement {
     areas.forEach(area => {
       const areaId = area.area_id;
 
-      // 🔍 Recherche de l'entité par défaut (lumière ou switch) liée à cette pièce
+      // 🔍 Recherche de l'entité maître pour valider la pièce
       let defaultEntity = null;
       const matchCard = Object.values(hass.states).find(s => 
         (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.') || s.entity_id.startsWith('input_boolean.')) && 
@@ -210,14 +238,14 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (matchCard) defaultEntity = matchCard.entity_id;
 
-      // 🛡️ CORRECTION : Si la pièce n'a aucune entité, on l'ignore complètement pour ne pas encombrer l'affichage
+      // Filtrer les pièces vides
       if (!defaultEntity) return;
 
       const areaName = area.name;
       const areaIcon = area.icon || "mdi:home-outline";
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
 
-      // Récupération des capteurs secondaires
+      // Récupération dynamique de la température
       let areaTemp = "N/A";
       const tSensor = Object.values(hass.states).find(s => 
         s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
@@ -225,6 +253,7 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (tSensor) areaTemp = tSensor.state + (tSensor.attributes.unit_of_measurement || '°C');
 
+      // Récupération dynamique de l'humidité
       let areaHumidity = "N/A";
       const hSensor = Object.values(hass.states).find(s => 
         s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'humidity' && 
@@ -232,7 +261,7 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
 
-      // Remplacement global et propre des variables sur le modèle unique
+      // Remplacement complet en chaîne de caractères pour injecter toutes les variables demandées
       let raw = JSON.stringify(template);
       raw = raw.replaceAll('[[area_id]]', areaId)
                .replaceAll('[[area_name]]', areaName)
@@ -265,13 +294,13 @@ class AllAreasDisplay extends HTMLElement {
 }
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement catalogue
+// Catalogue Lovelace
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
     name: "All Areas Display",
     preview: true,
-    description: "Générateur automatique par zone active avec modèle unique réplicable."
+    description: "Multi-générateur automatique par pièce avec injection complète de variables."
   });
 }
