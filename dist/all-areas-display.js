@@ -83,9 +83,6 @@ class AllAreasDisplayEditor extends HTMLElement {
             Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
           </p>
           <div id="card-yaml-editor-container"></div>
-          <button id="apply-yaml-btn" style="padding: 10px; background: var(--accent-color, #03a9f4); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; transition: background 0.2s;">
-            Appliquer les modifications YAML
-          </button>
         </div>
 
       </div>
@@ -98,14 +95,16 @@ class AllAreasDisplayEditor extends HTMLElement {
     this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#sort-select").addEventListener("change", (e) => this._updateConfig({ sort_by: e.target.value }));
 
-    // Bouton de sauvegarde forcée du YAML
-    this.querySelector("#apply-yaml-btn").addEventListener("click", () => this._saveYamlContent());
-
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
     this._cardYamlEditor.autofocus = false;
     yamlContainer.appendChild(this._cardYamlEditor);
+
+    // Écoute en temps réel des modifications du YAML (sans bouton)
+    this._cardYamlEditor.addEventListener("value-changed", (e) => {
+      this._handleYamlChange(e.detail.value);
+    });
 
     // Premier rendu du texte dans la boîte d'édition
     setTimeout(() => {
@@ -129,29 +128,19 @@ class AllAreasDisplayEditor extends HTMLElement {
     }
   }
 
-  // Sauvegarde déclenchée par le bouton
-  _saveYamlContent() {
-    const rawText = this._cardYamlEditor.value;
+  // Traitement en direct du changement YAML
+  _handleYamlChange(rawText) {
     const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+    if (!parser || typeof parser.load !== "function") return;
 
     try {
-      if (parser && typeof parser.load === "function") {
-        const parsedCard = parser.load(rawText);
-        if (parsedCard && typeof parsedCard === 'object') {
-          this._config = { ...this._config, card: parsedCard };
-          this._fireConfigChanged();
-          
-          const btn = this.querySelector("#apply-yaml-btn");
-          btn.style.background = "var(--success-color, #4caf50)";
-          btn.textContent = "Appliqué avec succès !";
-          setTimeout(() => {
-            btn.style.background = "var(--accent-color, #03a9f4)";
-            btn.textContent = "Appliquer les modifications YAML";
-          }, 1500);
-        }
+      const parsedCard = parser.load(rawText);
+      if (parsedCard && typeof parsedCard === 'object') {
+        this._config = { ...this._config, card: parsedCard };
+        this._fireConfigChanged();
       }
     } catch (err) {
-      alert("Erreur de syntaxe YAML. Vérifiez l'indentation et les espaces.");
+      // On ignore silencieusement pendant que l'utilisateur écrit pour éviter de bloquer la saisie
     }
   }
 
@@ -433,12 +422,12 @@ class AllAreasDisplay extends HTMLElement {
       this._childElements = [];
 
       if (userLayout.type === "auto") {
-        // Application de l'ajustement dynamique de largeur demandé
         const targetMinWidth = userLayout.min_width || "150px";
         
         const autoGridWrapper = document.createElement("div");
         autoGridWrapper.style.display = "grid";
-        autoGridWrapper.style.gridTemplateColumns = `repeat(auto-fit, minmax(${targetMinWidth}, 1fr))`;
+        // Utilisation de auto-fill à la place de auto-fit pour forcer l'alignement uniforme
+        autoGridWrapper.style.gridTemplateColumns = `repeat(auto-fill, minmax(${targetMinWidth}, 1fr))`;
         autoGridWrapper.style.gap = "8px";
         autoGridWrapper.style.width = "100%";
 
