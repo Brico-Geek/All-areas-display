@@ -154,9 +154,15 @@ class AllAreasDisplayEditor extends HTMLElement {
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    
-    // On utilise notre méthode interne récursive : zéro dépendance, zéro corruption
-    this._cardYamlEditor.value = this._stringifyYaml(currentCardConfig).trim();
+
+    // On utilise la fonction native JSON.stringify avec un décalage de 2 espaces.
+    // L'éditeur 'ha-code-editor' de Home Assistant est capable de parser cela nativement
+    // s'il est en mode YAML.
+    try {
+      this._cardYamlEditor.value = JSON.stringify(currentCardConfig, null, 2);
+    } catch (e) {
+      console.error("Erreur lors de la conversion YAML", e);
+    }
   }
 
   _handleYamlChange(rawText) {
