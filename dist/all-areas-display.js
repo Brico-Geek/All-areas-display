@@ -1,10 +1,14 @@
 // ==========================================
-// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS
+// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS (VERSION SÉCURISÉE)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
     this._config = config;
-    this._render();
+    if (this._initialized) {
+      this._updateUiFields();
+    } else {
+      this._render();
+    }
   }
 
   set hass(hass) {
@@ -16,10 +20,7 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   async _render() {
-    if (this._initialized) {
-      this._updateUiFields();
-      return;
-    }
+    if (this._initialized) return;
     this._initialized = true;
 
     this.innerHTML = `
@@ -80,7 +81,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         <div style="display: flex; flex-direction: column; gap: 8px;">
           <label style="font-weight: bold; color: var(--primary-text-color);">Modèle de la carte (YAML) :</label>
           <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
+            Utilisez <code>this.area.id</code>, <code>this.area.name</code>.
           </p>
           <div id="card-yaml-editor-container"></div>
           <button id="apply-yaml-btn" style="padding: 10px; background: var(--accent-color, #03a9f4); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; transition: background 0.2s;">
@@ -97,8 +98,6 @@ class AllAreasDisplayEditor extends HTMLElement {
     this.querySelector("#auto-width").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutUiChange());
     this.querySelector("#sort-select").addEventListener("change", (e) => this._updateConfig({ sort_by: e.target.value }));
-
-    // Bouton de sauvegarde forcée du YAML
     this.querySelector("#apply-yaml-btn").addEventListener("click", () => this._saveYamlContent());
 
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
@@ -107,41 +106,66 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._cardYamlEditor.autofocus = false;
     yamlContainer.appendChild(this._cardYamlEditor);
 
-    // Premier rendu du texte dans la boîte d'édition
+    // Laisse le temps au ha-code-editor d'exister proprement dans le DOM
     setTimeout(() => {
+      this._updateUiFields();
       this._forceYamlDumpInEditor();
-    }, 150);
-
-    this._updateUiFields();
+    }, 100);
   }
 
-  // Injecte la configuration actuelle dans la zone de texte
+  _getParser() {
+    if (window.jsyaml) return window.jsyaml;
+    const haEditor = customElements.get("ha-code-editor");
+    if (haEditor && haEditor.lazyBlaze) return haEditor.lazyBlaze;
+    return null;
+  }
+
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+    const parser = this._getParser();
 
-    if (parser && typeof parser.dump === "function") {
-      this._cardYamlEditor.value = parser.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
-    } else {
-      this._cardYamlEditor.value = Object.entries(currentCardConfig)
-        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
+    try {
+      if (parser && typeof parser.dump === "function") {
+        this._cardYamlEditor.value = parser.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
+      } else {
+        // Fallback propre formaté et indenté manuellement si aucun parser n'est prêt
+        this._cardYamlEditor.value = Object.entries(currentCardConfig)
+          .map(([k, v]) => {
+            if (typeof v === 'object') return `${k}:\n  ${JSON.stringify(v)}`;
+            return `${k}: ${v}`;
+          }).join('\n');
+      }
+    } catch (e) {
+      console.warn("Erreur d'écriture initiale du YAML", e);
     }
   }
 
-  // Sauvegarde déclenchée par le bouton
   _saveYamlContent() {
     const rawText = this._cardYamlEditor.value;
-    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+    const parser = this._getParser();
 
     try {
+      let parsedCard = null;
       if (parser && typeof parser.load === "function") {
-        const parsedCard = parser.load(rawText);
-        if (parsedCard && typeof parsedCard === 'object') {
-          this._config = { ...this._config, card: parsedCard };
-          this._fireConfigChanged();
-          
-          const btn = this.querySelector("#apply-yaml-btn");
+        parsedCard = parser.load(rawText);
+      } else {
+        // Fallback basique d'analyse si le parser HA est bloqué
+        parsedCard = {};
+        rawText.split('\n').forEach(line => {
+          const parts = line.split(':');
+          if (parts.length >= 2) {
+            parsedCard[parts[0].trim()] = parts.slice(1).join(':').trim();
+          }
+        });
+      }
+
+      if (parsedCard && typeof parsedCard === 'object') {
+        this._config = { ...this._config, card: parsedCard };
+        this._fireConfigChanged();
+        
+        const btn = this.querySelector("#apply-yaml-btn");
+        if (btn) {
           btn.style.background = "var(--success-color, #4caf50)";
           btn.textContent = "Appliqué avec succès !";
           setTimeout(() => {
@@ -151,7 +175,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         }
       }
     } catch (err) {
-      alert("Erreur de syntaxe YAML. Vérifiez l'indentation et les espaces.");
+      alert("Erreur de syntaxe YAML. Vérifiez l'indentation.");
     }
   }
 
@@ -174,28 +198,28 @@ class AllAreasDisplayEditor extends HTMLElement {
     
     if (layout.type === "vertical-stack") {
       select.value = "vertical";
-      autoOptions.style.display = "none";
-      gridOptions.style.display = "none";
-      squareContainer.style.display = "none";
+      if(autoOptions) autoOptions.style.display = "none";
+      if(gridOptions) gridOptions.style.display = "none";
+      if(squareContainer) squareContainer.style.display = "none";
     } else if (layout.type === "horizontal-stack") {
       select.value = "horizontal";
-      autoOptions.style.display = "none";
-      gridOptions.style.display = "none";
-      squareContainer.style.display = "none";
+      if(autoOptions) autoOptions.style.display = "none";
+      if(gridOptions) gridOptions.style.display = "none";
+      if(squareContainer) squareContainer.style.display = "none";
     } else if (layout.type === "grid") {
       select.value = "grid";
-      autoOptions.style.display = "none";
-      gridOptions.style.display = "flex";
-      squareContainer.style.display = "flex";
-      colsInput.value = Math.max(2, layout.columns || 2);
-      squareCheckbox.checked = layout.square || false;
+      if(autoOptions) autoOptions.style.display = "none";
+      if(gridOptions) gridOptions.style.display = "flex";
+      if(squareContainer) squareContainer.style.display = "flex";
+      if(colsInput) colsInput.value = Math.max(2, layout.columns || 2);
+      if(squareCheckbox) squareCheckbox.checked = layout.square || false;
     } else {
       select.value = "auto";
-      autoOptions.style.display = "flex";
-      gridOptions.style.display = "none";
-      squareContainer.style.display = "flex";
-      autoWidthInput.value = layout.min_width || "150px";
-      squareCheckbox.checked = layout.square || false;
+      if(autoOptions) autoOptions.style.display = "flex";
+      if(gridOptions) gridOptions.style.display = "none";
+      if(squareContainer) squareContainer.style.display = "flex";
+      if(autoWidthInput) autoWidthInput.value = layout.min_width || "150px";
+      if(squareCheckbox) squareCheckbox.checked = layout.square || false;
     }
   }
 
@@ -433,7 +457,6 @@ class AllAreasDisplay extends HTMLElement {
       this._childElements = [];
 
       if (userLayout.type === "auto") {
-        // Application de l'ajustement dynamique de largeur demandé
         const targetMinWidth = userLayout.min_width || "150px";
         
         const autoGridWrapper = document.createElement("div");
