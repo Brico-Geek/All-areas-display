@@ -38,8 +38,8 @@ class AllAreasDisplayEditor extends HTMLElement {
           <!-- Options dynamiques pour la Grille -->
           <div id="grid-options" style="display: none; gap: 12px; align-items: center; margin-top: 6px;">
             <div style="display: flex; align-items: center; gap: 6px;">
-              <label style="color: var(--primary-text-color); font-size: 0.9em;">Colonnes :</label>
-              <input id="grid-columns" type="number" min="1" max="12" style="width: 50px; padding: 6px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);" />
+              <label style="color: var(--primary-text-color); font-size: 0.9em;">Colonnes (Min 2) :</label>
+              <input id="grid-columns" type="number" min="2" max="12" style="width: 50px; padding: 6px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);" />
             </div>
           </div>
 
@@ -70,31 +70,41 @@ class AllAreasDisplayEditor extends HTMLElement {
       </div>
     `;
 
-    // Événements de l'interface graphique
     this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutChange());
     this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutChange());
     this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutChange());
 
-    // Initialisation forcée de la zone de code en pur YAML
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
     
+    // Forçage du rendu en vrai YAML via le parseur interne de Home Assistant si jsyaml manque
     const initialCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    this._cardYamlEditor.value = window.jsyaml ? window.jsyaml.dump(initialCardConfig) : JSON.stringify(initialCardConfig, null, 2);
+    const hassYamlParser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze; 
+    
+    if (hassYamlParser && typeof hassYamlParser.dump === "function") {
+      this._cardYamlEditor.value = hassYamlParser.dump(initialCardConfig);
+    } else if (window.DumpYaml) {
+      this._cardYamlEditor.value = window.DumpYaml(initialCardConfig);
+    } else {
+      // Fallback ultime au cas où HA tarde à exposer son parser au démarrage
+      this._cardYamlEditor.value = Object.entries(initialCardConfig)
+        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
+    }
 
     this._cardYamlEditor.addEventListener("value-changed", (ev) => {
       ev.stopPropagation();
       try {
-        if (window.jsyaml) {
-          const parsedCard = window.jsyaml.load(ev.detail.value);
+        const loadParser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+        if (loadParser && typeof loadParser.load === "function") {
+          const parsedCard = loadParser.load(ev.detail.value);
           if (parsedCard && typeof parsedCard === 'object') {
             this._config.card = parsedCard;
             this._fireConfigChanged();
           }
         }
       } catch (err) {
-        // Reste silencieux pendant la frappe du YAML
+        // Silencieux pendant l'édition
       }
     });
 
@@ -114,11 +124,12 @@ class AllAreasDisplayEditor extends HTMLElement {
     } else if (selectType === "auto") {
       newLayout = { type: "auto" };
     } else if (selectType === "grid") {
-      const cols = parseInt(this.querySelector("#grid-columns").value) || 2;
+      // Limite forcée à 2 colonnes minimum en JS
+      const inputCols = parseInt(this.querySelector("#grid-columns").value) || 2;
+      const cols = Math.max(2, inputCols);
       newLayout = { type: "grid", columns: cols };
     }
 
-    // L'option square est gérée nativement par le grid HA
     if (selectType === "grid" || selectType === "auto") {
       newLayout.square = isSquare;
     }
@@ -150,12 +161,12 @@ class AllAreasDisplayEditor extends HTMLElement {
       select.value = "grid";
       gridOptions.style.display = "flex";
       squareContainer.style.display = "flex";
-      colsInput.value = layout.columns || 2;
+      colsInput.value = Math.max(2, layout.columns || 2);
       squareCheckbox.checked = layout.square || false;
     } else {
       select.value = "auto";
       gridOptions.style.display = "none";
-      squareContainer.style.display = "flex"; // Autorise le mode carré en mode auto flexible
+      squareContainer.style.display = "flex";
       squareCheckbox.checked = layout.square || false;
     }
   }
@@ -176,7 +187,6 @@ class AllAreasDisplayEditor extends HTMLElement {
       label.style.alignItems = "center";
       label.style.gap = "8px";
       label.style.color = "var(--primary-text-color)";
-      label.style.fontSize = "0.95em";
       label.style.cursor = "pointer";
 
       const checkbox = document.createElement("input");
@@ -226,14 +236,9 @@ class AllAreasDisplay extends HTMLElement {
   static getStubConfig() {
     return {
       type: "custom:all-areas-display",
-      layout: {
-        type: "auto"
-      },
+      layout: { type: "auto" },
       exclude: [],
-      card: {
-        type: "area",
-        area: "this.area.id"
-      }
+      card: { type: "area", area: "this.area.id" }
     };
   }
 
@@ -252,7 +257,8 @@ class AllAreasDisplay extends HTMLElement {
       this.content = this.querySelector('#card-container');
     }
 
-    if (this._layoutElement && oldHass && oldHass.areas === hass.areas && oldHass.states === hass.states) {
+    // Évite les re-générations inutiles qui provoquent des clignotements d'états
+    if (this._layoutElement && oldHass && JSON.stringify(oldHass.areas) === JSON.stringify(hass.areas) && oldHass.states === hass.states) {
       this._layoutElement.hass = hass;
       return;
     }
@@ -261,11 +267,14 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   async _buildContainer() {
+    // Verrou antirebond pour tuer définitivement le double affichage asynchrone
+    if (this._building) return;
+    this._building = true;
+
     const config = this._config;
     const hass = this._hass;
     let areas = Object.values(hass.areas || {});
     
-    // 1. Filtrer les exclusions (par ID ou par Nom)
     const excludeList = (config.exclude || []).map(item => String(item).toLowerCase());
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
@@ -275,14 +284,13 @@ class AllAreasDisplay extends HTMLElement {
 
     if (areas.length === 0) {
       this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce à afficher.</ha-alert>`;
+      this._building = false;
       return;
     }
 
     const userLayout = config.layout || { type: "auto" };
-    this.content.innerHTML = '';
-
-    // 2. Traitement de la génération des cartes enfants
     const childCardsRaw = [];
+
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name || areaId;
@@ -350,40 +358,40 @@ class AllAreasDisplay extends HTMLElement {
       }
     });
 
-    // 3. Rendu selon la disposition choisie
     try {
       const helpers = await window.loadCardHelpers();
+      
+      // On vide le conteneur juste avant l'écriture finale pour tuer les doublons éphémères
+      this.content.innerHTML = '';
 
       if (userLayout.type === "auto") {
-        // MODE AUTO FLEXIBLE ET EXTENSIBLE
-        // On génère un wrapper div avec flexbox élastique
-        const flexWrapper = document.createElement("div");
-        flexWrapper.style.display = "flex";
-        flexWrapper.style.flexWrap = "wrap";
-        flexWrapper.style.gap = "8px";
-        flexWrapper.style.width = "100%";
+        // Grid CSS natif à taille homogène et adaptative
+        const autoGridWrapper = document.createElement("div");
+        autoGridWrapper.style.display = "grid";
+        autoGridWrapper.style.gridTemplateColumns = "repeat(auto-fit, minmax(150px, 1fr))";
+        autoGridWrapper.style.gap = "8px";
+        autoGridWrapper.style.width = "100%";
 
         for (const cardConfig of childCardsRaw) {
           const cardEl = helpers.createCardElement(cardConfig);
           cardEl.hass = hass;
-          
-          // Force chaque carte à s'étirer (flex-grow: 1) tout en gardant une taille de base (150px)
-          cardEl.style.flex = "1 1 150px";
-          cardEl.style.minWidth = "150px";
-          
           if (userLayout.square) {
             cardEl.style.aspectRatio = "1 / 1";
           }
-          
-          flexWrapper.appendChild(cardEl);
+          autoGridWrapper.appendChild(cardEl);
         }
         
-        this.content.appendChild(flexWrapper);
-        this._layoutElement = flexWrapper;
+        this.content.appendChild(autoGridWrapper);
+        this._layoutElement = autoGridWrapper;
 
       } else {
-        // MODES STANDARD (GRID, VERTICAL, HORIZONTAL STACK) via Lovelace
-        const layoutConfig = { ...userLayout, cards: childCardsRaw };
+        // Logique Grid Lovelace standard forcée à 2 colonnes minimum
+        const finalLayout = { ...userLayout };
+        if (finalLayout.type === "grid" && finalLayout.columns) {
+          finalLayout.columns = Math.max(2, finalLayout.columns);
+        }
+
+        const layoutConfig = { ...finalLayout, cards: childCardsRaw };
         const element = helpers.createCardElement(layoutConfig);
         element.hass = hass;
         
@@ -392,6 +400,8 @@ class AllAreasDisplay extends HTMLElement {
       }
     } catch (err) {
       console.error("Erreur de rendu du container principal :", err);
+    } finally {
+      this._building = false;
     }
   }
 
@@ -399,7 +409,7 @@ class AllAreasDisplay extends HTMLElement {
 }
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement catalogue Lovelace
+// Enregistrement Lovelace Card
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
