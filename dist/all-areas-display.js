@@ -1,61 +1,86 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL (INTERFACE GRAPHIQUE)
+// 1. L'ÉDITEUR VISUEL COMPATIBLE HOME ASSISTANT (GUI)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
     this._config = config;
+    this._render();
   }
 
   set hass(hass) {
     this._hass = hass;
-    if (!this.content) {
-      this.innerHTML = `
-        <div class="card-config" style="padding: 10px; font-family: sans-serif; display: flex; flex-direction: column; gap: 15px;">
-          <div style="display: flex; flex-direction: column; gap: 5px;">
-            <label style="font-weight: bold; font-size: 0.9em; color: var(--secondary-text-color);">Nombre de colonnes :</label>
-            <input type="number" id="columns" min="1" max="6" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);">
-          </div>
-          <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4;">
-            💡 Les templates de boutons (<code>button_template</code>) et de popups (<code>popup_template</code>) se configurent pour le moment directement via l'éditeur YAML ci-contre.
-          </div>
-        </div>
-      `;
-      this.content = this.querySelector('.card-config');
-      
-      // Gérer le changement de valeur du champ colonnes
-      this.querySelector('#columns').addEventListener('change', (ev) => {
-        if (!this._config) return;
-        const newConfig = {
-          ...this._config,
-          layout_options: {
-            ...this._config.layout_options,
-            columns: parseInt(ev.target.value, 10) || 2
-          }
-        };
-        // Déclencher l'événement de mise à jour pour HA
-        const event = new CustomEvent("config-changed", {
-          detail: { config: newConfig },
-          bubbles: true,
-          composed: true,
-        });
-        this.dispatchEvent(event);
-      });
+    if (this._formElement) {
+      this._formElement.hass = hass;
     }
+  }
 
-    // Appliquer la valeur actuelle de la config dans l'input
-    if (this._config) {
-      this.querySelector('#columns').value = this._config.layout_options?.columns || 2;
-    }
+  _render() {
+    if (this._formElement) return;
+
+    this.innerHTML = `
+      <div class="card-config" style="padding: 8px;">
+        <ha-form id="form"></ha-form>
+        <div style="margin-top: 15px; font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; border-left: 3px solid var(--primary-color); padding-left: 10px;">
+          <strong>Variables dynamiques utilisables dans ton YAML :</strong><br>
+          • <code>[[area_name]]</code> : Nom de la pièce<br>
+          • <code>[[area_icon]]</code> : Icône de la pièce configurée dans HA<br>
+          • <code>[[area_slug]]</code> : ID de navigation (ex: #salon)<br>
+          • <code>[[area_temp]]</code> : Température trouvée automatiquement<br>
+          • <code>[[area_humidity]]</code> : Humidité trouvée automatiquement<br>
+          • <code>[[default_entity]]</code> : Première lumière ou interrupteur détecté
+        </div>
+      </div>
+    `;
+
+    this._formElement = this.querySelector("#form");
+
+    // Définir les champs que l'éditeur visuel va afficher
+    const schema = [
+      {
+        name: "columns",
+        label: "Nombre de colonnes de la grille",
+        type: "integer",
+        default: 2,
+        valueMin: 1,
+        valueMax: 6
+      }
+    ];
+
+    // Mapper les données actuelles de la config vers le formulaire
+    const data = {
+      columns: this._config?.layout_options?.columns || 2
+    };
+
+    this._formElement.schema = schema;
+    this._formElement.data = data;
+
+    // Écouter les changements faits depuis l'interface graphique
+    this._formElement.addEventListener("value-changed", (ev) => {
+      const value = ev.detail.value;
+      const newConfig = {
+        ...this._config,
+        layout_options: {
+          ...this._config.layout_options,
+          columns: value.columns
+        }
+      };
+
+      const event = new CustomEvent("config-changed", {
+        detail: { config: newConfig },
+        bubbles: true,
+        composed: true,
+      });
+      this.dispatchEvent(event);
+    });
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LA CARTE PRINCIPALE
+// 2. LA CARTE PRINCIPALE (ALL AREAS DISPLAY)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
-  // Indiquer à Home Assistant d'utiliser l'éditeur créé au-dessus
   static getConfigElement() {
     return document.createElement("all-areas-display-editor");
   }
@@ -69,8 +94,9 @@ class AllAreasDisplay extends HTMLElement {
         type: "custom:bubble-card",
         card_type: "button",
         entity: "[[default_entity]]",
+        icon: "[[area_icon]]",
         name: "[[area_name]]",
-        sub_name: "[[area_temp]]",
+        sub_name: "[[area_temp]] - [[area_humidity]]",
         tap_action: {
           action: "navigate",
           navigation_path: "#[[area_slug]]"
@@ -113,8 +139,11 @@ class AllAreasDisplay extends HTMLElement {
       const areaId = area.area_id;
       const areaName = area.name;
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
+      
+      // 🎨 1. Récupérer l'icône de la pièce (ou icône maison par défaut)
+      const areaIcon = area.icon || "mdi:home-outline";
 
-      // 🔍 1. Trouver une entité par défaut pour éviter le crash de Bubble Card
+      // 🔍 2. Trouver une entité de contrôle par défaut (Lumière, Prise ou Switch)
       let defaultEntity = "sun.sun"; 
       const lightEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('light.') && 
@@ -124,28 +153,39 @@ class AllAreasDisplay extends HTMLElement {
         defaultEntity = lightEntity.entity_id;
       } else {
         const switchEntity = Object.values(hass.states).find(state => 
-          state.entity_id.startsWith('switch.') && 
+          (state.entity_id.startsWith('switch.') || state.entity_id.startsWith('input_boolean.')) && 
           hass.entities[state.entity_id]?.area_id === areaId
         );
         if (switchEntity) defaultEntity = switchEntity.entity_id;
       }
 
-      // 🌡️ 2. Récupérer la température de la pièce
+      // 🌡️ 3. Récupérer la température automatique de la pièce
       let areaTemp = "N/A";
       const tempEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
-        state.entity_id.includes('temperature') && 
+        (state.entity_id.includes('temperature') || state.attributes.device_class === 'temperature') && 
         hass.entities[state.entity_id]?.area_id === areaId
       );
       if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
 
-      // 📝 3. Injection des variables dans le template
+      // 💧 4. Récupérer l'humidité automatique de la pièce
+      let areaHumidity = "N/A";
+      const humEntity = Object.values(hass.states).find(state => 
+        state.entity_id.startsWith('sensor.') && 
+        (state.entity_id.includes('humidity') || state.attributes.device_class === 'humidity') && 
+        hass.entities[state.entity_id]?.area_id === areaId
+      );
+      if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
+
+      // 📝 5. Clonage et remplacement des variables dans les templates
       const replaceVariables = (obj) => {
         let str = JSON.stringify(obj);
         str = str.replaceAll('[[area_id]]', areaId);
         str = str.replaceAll('[[area_name]]', areaName);
+        str = str.replaceAll('[[area_icon]]', areaIcon);
         str = str.replaceAll('[[area_slug]]', areaSlug);
         str = str.replaceAll('[[area_temp]]', areaTemp);
+        str = str.replaceAll('[[area_humidity]]', areaHumidity);
         str = str.replaceAll('[[default_entity]]', defaultEntity);
         return JSON.parse(str);
       };
@@ -183,7 +223,7 @@ customElements.define('all-areas-display', AllAreasDisplay);
 
 
 // ==========================================
-// 3. ENREGISTREMENT DANS LE CATALOGUE HA
+// 3. DÉCLARATION OFFICIELLE CATALOGUE
 // ==========================================
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
@@ -191,6 +231,6 @@ if (!window.customCards.some(c => c.type === 'all-areas-display')) {
     type: "all-areas-display",
     name: "All areas display",
     preview: true,
-    description: "Génère dynamiquement des grilles de cartes (Bubble Card, etc.) pour toutes vos pièces."
+    description: "Génère des grilles de cartes dynamiques basées sur vos pièces, températures et humidités."
   });
 }
