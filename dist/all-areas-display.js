@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR AVEC APPEL DU DIALOGUE NATIF
+// 1. L'ÉDITEUR SIMPLE (VISUEL + CODE CONFIG)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -10,18 +10,20 @@ class AllAreasDisplayEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._formElement) this._formElement.hass = hass;
+    if (this._cardEditor) this._cardEditor.hass = hass;
   }
 
   async _render() {
+    // Si le formulaire principal est déjà rendu, on évite de tout reconstruire inutilement
     if (this.querySelector("#layout-form")) {
-      this._updatePreviewState();
+      this._updateEditorHass();
       return;
     }
 
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
         
-        <!-- 1. Disposition Globale -->
+        <!-- 1. Choix de la Disposition globale -->
         <div>
           <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1em;">1. Disposition globale</h3>
           <ha-form id="layout-form"></ha-form>
@@ -29,32 +31,27 @@ class AllAreasDisplayEditor extends HTMLElement {
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
-        <!-- 2. Zone de Sélection de la carte via l'assistant officiel -->
+        <!-- 2. Éditeur de carte avec bouton de bascule d'interface -->
         <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Carte modèle</h3>
-          <p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Ouvrez le catalogue de Home Assistant pour choisir et configurer n'importe quelle carte (bouton, tuile, carte personnalisée...).
-          </p>
+          <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1em;">2. Configuration de la carte modèle</h3>
           
-          <button id="open-picker-btn" style="
-            width: 100%;
-            background: var(--primary-color);
-            color: var(--text-primary-color, white);
-            border: none;
-            padding: 12px;
-            border-radius: 8px;
-            font-weight: bold;
-            font-size: 1em;
-            cursor: pointer;
-            box-shadow: var(--ha-card-box-shadow, none);
-            transition: background 0.2s;
-          " onmouseover="this.style.background='var(--accent-color)'" onmouseout="this.style.background='var(--primary-color)'">
-            🔍 CHOISIR / MODIFIER LA CARTE MODÈLE
-          </button>
-
-          <div id="current-template-info" style="margin-top: 12px; font-size: 0.9em; color: var(--secondary-text-color); font-style: italic;">
-            Aucune carte sélectionnée.
+          <div id="editor-container" style="min-height: 150px; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; background: var(--card-background-color);">
+            <!-- L'éditeur officiel (Visuel ou Code YAML) s'injecte ici -->
           </div>
+          
+          <button id="toggle-editor-mode" style="
+            margin-top: 12px;
+            width: 100%;
+            background: var(--secondary-background-color);
+            color: var(--primary-text-color);
+            border: 1px solid var(--divider-color);
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+          ">
+            🔄 Basculer entre Éditeur Visuel / Code (YAML)
+          </button>
         </div>
 
       </div>
@@ -62,13 +59,14 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     this._formElement = this.querySelector("#layout-form");
     this._setupLayoutForm();
+    await this._attachCardEditor();
 
-    // Au clic, on déclenche l'assistant officiel de sélection de carte de Home Assistant
-    this.querySelector("#open-picker-btn").addEventListener("click", () => {
-      this._openNativeCardPicker();
+    // Gestion du clic pour changer le mode d'édition de la sous-carte
+    this.querySelector("#toggle-editor-mode").addEventListener("click", () => {
+      if (this._cardEditor) {
+        this._cardEditor.toggleMode();
+      }
     });
-
-    this._updatePreviewState();
   }
 
   _setupLayoutForm() {
@@ -116,53 +114,39 @@ class AllAreasDisplayEditor extends HTMLElement {
     });
   }
 
-  // Appele l'assistant de carte officiel de HA au premier plan
-  _openNativeCardPicker() {
-    const event = new CustomEvent("show-dialog", {
-      bubbles: true,
-      composed: true,
-      detail: {
-        dialogTag: "hui-dialog-edit-card",
-        dialogImport: () => import("/frontend_latest/hui-dialog-edit-card.js"),
-        dialogParams: {
-          lovelaceConfig: { cards: [] },
-          // Si on a déjà choisi une carte, on la charge pour la modifier, sinon le sélecteur complet s'ouvre
-          cardConfig: this._config?.template_card || undefined,
-          saveCard: (newCardConfig) => {
-            // Nettoyage rapide des variables injectées par HA lors de la configuration
-            if (newCardConfig) {
-              newCardConfig.name = "[[area_name]]";
-              newCardConfig.icon = "[[area_icon]]";
-              if (newCardConfig.type === "glance" || newCardConfig.type === "entities") {
-                newCardConfig.entities = ["[[default_entity]]"];
-              } else {
-                newCardConfig.entity = "[[default_entity]]";
-              }
-            }
+  async _attachCardEditor() {
+    const container = this.querySelector("#editor-container");
+    if (!container) return;
 
-            this._config = {
-              ...this._config,
-              template_card: newCardConfig
-            };
-            this._updatePreviewState();
-            this._fireConfigChanged();
-          }
-        }
-      }
+    // L'élément officiel de HA qui gère à la fois l'UI visuelle d'une carte et sa bascule de mode
+    const cardEditor = document.createElement("hui-card-element-editor");
+    cardEditor.hass = this._hass;
+    
+    // Valeur initiale si aucune configuration n'existe encore
+    cardEditor.value = this._config?.template_card || { 
+      type: "button", 
+      name: "[[area_name]]", 
+      icon: "[[area_icon]]", 
+      entity: "[[default_entity]]" 
+    };
+
+    cardEditor.addEventListener("config-changed", (ev) => {
+      ev.stopPropagation();
+      this._config = {
+        ...this._config,
+        template_card: ev.detail.config
+      };
+      this._fireConfigChanged();
     });
-    this.dispatchEvent(event);
+
+    container.innerHTML = "";
+    container.appendChild(cardEditor);
+    this._cardEditor = cardEditor;
   }
 
-  _updatePreviewState() {
-    const info = this.querySelector("#current-template-info");
-    if (!info) return;
-    if (this._config?.template_card?.type) {
-      info.textContent = `Type sélectionné : ${this._config.template_card.type}`;
-      info.style.color = "var(--success-color, green)";
-    } else {
-      info.textContent = "Aucune carte sélectionnée. Cliquez sur le bouton ci-dessus.";
-      info.style.color = "var(--secondary-text-color)";
-    }
+  _updateEditorHass() {
+    if (this._cardEditor && this._hass) this._cardEditor.hass = this._hass;
+    if (this._formElement && this._hass) this._formElement.hass = this._hass;
   }
 
   _fireConfigChanged() {
@@ -188,7 +172,13 @@ class AllAreasDisplay extends HTMLElement {
     return {
       type: "custom:all-areas-display",
       layout_type: "grid",
-      layout_options: { columns: 2 }
+      layout_options: { columns: 2 },
+      template_card: {
+        type: "button",
+        name: "[[area_name]]",
+        icon: "[[area_icon]]",
+        entity: "[[default_entity]]"
+      }
     };
   }
 
@@ -213,12 +203,7 @@ class AllAreasDisplay extends HTMLElement {
     const template = config.template_card;
 
     if (!template || Object.keys(template).length === 0) {
-      this.content.innerHTML = `
-        <div style="padding: 30px; text-align: center; color: var(--secondary-text-color); border: 2px dashed var(--divider-color); border-radius: 12px; margin: 10px;">
-          <div style="font-size: 1.2em; font-weight: bold; margin-bottom: 8px;">Aucune carte modèle</div>
-          Utilisez le bouton dans la colonne de gauche pour ouvrir l'assistant officiel et générer vos pièces.
-        </div>
-      `;
+      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Définissez une carte valide dans la configuration.</div>`;
       return;
     }
 
@@ -235,6 +220,7 @@ class AllAreasDisplay extends HTMLElement {
     areas.forEach(area => {
       const areaId = area.area_id;
 
+      // Recherche automatique d'une entité actionnable par pièce
       let defaultEntity = null;
       const matchCard = Object.values(hass.states).find(s => 
         (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.') || s.entity_id.startsWith('input_boolean.')) && 
@@ -248,6 +234,7 @@ class AllAreasDisplay extends HTMLElement {
       const areaIcon = area.icon || "mdi:home-outline";
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
 
+      // Capteurs additionnels si disponibles
       let areaTemp = "N/A";
       const tSensor = Object.values(hass.states).find(s => 
         s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
@@ -262,6 +249,7 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
 
+      // Application des variables dynamiques sur la carte
       let raw = JSON.stringify(template);
       raw = raw.replaceAll('[[area_id]]', areaId)
                .replaceAll('[[area_name]]', areaName)
@@ -282,7 +270,7 @@ class AllAreasDisplay extends HTMLElement {
       this.content.innerHTML = '';
       this.content.appendChild(element);
     } catch (err) {
-      this.content.innerHTML = `<p style="color:red; padding:10px;">Erreur de génération : ${err.message}</p>`;
+      this.content.innerHTML = `<p style="color:red; padding:10px;">Erreur d'affichage : ${err.message}</p>`;
     }
   }
 
@@ -303,6 +291,6 @@ if (!window.customCards.some(c => c.type === 'all-areas-display')) {
     type: "all-areas-display",
     name: "All Areas Display",
     preview: true,
-    description: "Multi-générateur utilisant l'assistant officiel de cartes."
+    description: "Multi-générateur de cartes épuré."
   });
 }
