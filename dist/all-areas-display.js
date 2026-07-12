@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI OPTIMISÉ)
+// 1. L'ÉDITEUR VISUEL AVANCÉ (SÉCURISÉ)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   async setConfig(config) {
@@ -9,58 +9,46 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._layoutFormElement) {
-      this._layoutFormElement.hass = hass;
-    }
-    if (this._cardEditorElement) {
-      this._cardEditorElement.hass = hass;
-    }
+    if (this._layoutFormElement) this._layoutFormElement.hass = hass;
+    if (this._cardEditorElement) this._cardEditorElement.hass = hass;
   }
 
   async _render() {
+    // Si l'interface de base est déjà là, on met juste à jour les données du formulaire de layout
     if (this._layoutFormElement) {
       this._updateFormValues();
       return;
     }
 
-    // Design de l'interface avec des badges cliquables pour copier les variables
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
-        <h3 style="margin: 0; color: var(--primary-color);">1. Configuration de la Mise en Page</h3>
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px;">
+        <h3 style="margin: 0; color: var(--primary-color); font-size: 1.1em;">1. Configuration de la Mise en Page</h3>
         <ha-form id="layout-form"></ha-form>
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 5px 0;">
         
-        <h3 style="margin: 0; color: var(--primary-color);">2. Configuration du Modèle de Carte</h3>
+        <h3 style="margin: 0; color: var(--primary-color); font-size: 1.1em;">2. Modèle de Carte Enfant</h3>
         <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Choisissez le type de carte de base puis configurez-la. Les variables ci-dessous remplaceront dynamiquement les données par pièce.
+          Sélectionnez le type de carte à dupliquer pour chaque pièce.
         </p>
 
-        <!-- Sélecteur de type de carte pour changer d'interface facilement -->
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <label style="font-weight: bold; font-size: 0.9em;">Type de carte enfant :</label>
-          <select id="card-type-selector" style="padding: 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);">
-            <option value="tile">Tuile (Tile - Défaut)</option>
-            <option value="button">Bouton (Button)</option>
-            <option value="custom:mushroom-template-card">Mushroom Template</option>
-            <option value="custom:mushroom-chips-card">Mushroom Chips</option>
-            <option value="custom:button-card">Custom Button Card</option>
-          </select>
-        </div>
+        <select id="card-type-selector" style="padding: 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
+          <option value="tile">Tuile (Tile - Standard)</option>
+          <option value="button">Bouton (Button)</option>
+          <option value="custom:mushroom-template-card">Mushroom Template</option>
+          <option value="custom:mushroom-chips-card">Mushroom Chips</option>
+          <option value="custom:button-card">Custom Button Card</option>
+        </select>
 
-        <!-- Boîte d'aide interactive pour insérer les variables -->
-        <div style="background: var(--secondary-background-color); padding: 12px; border-radius: 8px; border: 1px dashed var(--divider-color);">
-          <strong style="font-size: 0.9em; display: block; margin-bottom: 8px;">💡 Astuce Variables :</strong>
-          <p style="margin: 0 0 8px 0; font-size: 0.8em; color: var(--secondary-text-color);">
-            L'éditeur officiel peut afficher une erreur rouge (ex: "Entité introuvable") quand vous tapez une variable. C'est normal ! La carte fonctionnera parfaitement une fois enregistrée.
-          </p>
+        <div style="background: var(--secondary-background-color); padding: 10px; border-radius: 6px; border: 1px dashed var(--divider-color); font-size: 0.85em;">
+          <strong style="display: block; margin-bottom: 4px;">💡 Variables (Cliquez pour copier) :</strong>
           <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-badges">
-            <span class="var-badge" data-var="[[area_name]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em; font-family: monospace;">[[area_name]]</span>
-            <span class="var-badge" data-var="[[area_icon]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em; font-family: monospace;">[[area_icon]]</span>
-            <span class="var-badge" data-var="[[default_entity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em; font-family: monospace;">[[default_entity]]</span>
-            <span class="var-badge" data-var="[[area_temp]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em; font-family: monospace;">[[area_temp]]</span>
-            <span class="var-badge" data-var="[[area_humidity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em; font-family: monospace;">[[area_humidity]]</span>
-            <span class="var-badge" data-var="[[area_slug]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-size: 0.8em; font-family: monospace;">[[area_slug]]</span>
+            <span class="var-badge" data-var="[[area_name]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_name]]</span>
+            <span class="var-badge" data-var="[[area_icon]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_icon]]</span>
+            <span class="var-badge" data-var="[[default_entity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[default_entity]]</span>
+            <span class="var-badge" data-var="[[area_temp]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_temp]]</span>
+            <span class="var-badge" data-var="[[area_humidity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_humidity]]</span>
+            <span class="var-badge" data-var="[[area_slug]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em;">[[area_slug]]</span>
           </div>
         </div>
         
@@ -72,20 +60,16 @@ class AllAreasDisplayEditor extends HTMLElement {
     const editorContainer = this.querySelector("#card-editor-container");
     const typeSelector = this.querySelector("#card-type-selector");
 
-    // Init du sélecteur de type de carte selon la config actuelle
+    // Assigner la valeur actuelle au sélecteur
     if (this._config.button_template?.type) {
-      if (typeSelector.querySelector(`option[value="${this._config.button_template.type}"]`)) {
-        typeSelector.value = this._config.button_template.type;
-      }
+      typeSelector.value = this._config.button_template.type;
     }
 
-    // Changement de type de carte à la volée
+    // Écouteur pour le changement de type de carte
     typeSelector.addEventListener("change", (ev) => {
       const targetType = ev.target.value;
-      const currentTemplate = this._config.button_template || {};
-      
-      // On reconstruit une configuration propre pour la nouvelle carte pour éviter les crashs de structure
       let newTemplate = { type: targetType };
+      
       if (targetType === "tile" || targetType === "button") {
         newTemplate.entity = "[[default_entity]]";
         newTemplate.name = "[[area_name]]";
@@ -96,25 +80,24 @@ class AllAreasDisplayEditor extends HTMLElement {
         newTemplate.icon = "[[area_icon]]";
       }
 
-      this._fireConfigChanged({
-        ...this._config,
-        button_template: newTemplate
-      });
-
-      // On force le re-rendu complet du sous-éditeur pour appliquer le changement de type
-      this._layoutFormElement = null;
-      this._render();
+      this._config = { ...this._config, button_template: newTemplate };
+      if (this._cardEditorElement) this._cardEditorElement.value = newTemplate;
+      
+      this._fireConfigChanged(this._config);
     });
 
-    // Rendre les badges cliquables pour faciliter le copier-coller rapide
+    // Rendre les badges copiables
     this.querySelectorAll(".var-badge").forEach(badge => {
       badge.addEventListener("click", (ev) => {
         const text = ev.target.getAttribute("data-var");
-        navigator.clipboard.writeText(text);
-        alert(`Copié dans le presse-papier : ${text}\nCollez-le dans le champ de votre choix.`);
+        navigator.clipboard.writeText(text).then(() => {
+          badge.style.background = "var(--success-color, #4caf50)";
+          setTimeout(() => badge.style.background = "var(--primary-color)", 1000);
+        });
       });
     });
 
+    // Schéma Layout
     const layoutSchema = [
       {
         name: "layout_type",
@@ -131,10 +114,8 @@ class AllAreasDisplayEditor extends HTMLElement {
       },
       {
         name: "columns",
-        label: "Nombre de colonnes (Mode Grille)",
-        selector: {
-          number: { min: 1, max: 12, mode: "box" }
-        }
+        label: "Nombre de colonnes (Grille)",
+        selector: { number: { min: 1, max: 12, mode: "box" } }
       }
     ];
 
@@ -143,14 +124,15 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     this._layoutFormElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
-      this._fireConfigChanged({
+      this._config = {
         ...this._config,
         layout_type: value.layout_type || "grid",
         layout_options: { ...this._config.layout_options, columns: value.columns || 2 }
-      });
+      };
+      this._fireConfigChanged(this._config);
     });
 
-    // Injection de l'éditeur de carte Home Assistant
+    // Chargement sécurisé du sous-éditeur HA
     try {
       const helpers = await window.loadCardHelpers();
       this._cardEditorElement = document.createElement("hui-card-element-editor");
@@ -159,16 +141,13 @@ class AllAreasDisplayEditor extends HTMLElement {
 
       this._cardEditorElement.addEventListener("config-changed", (ev) => {
         ev.stopPropagation();
-        this._fireConfigChanged({
-          ...this._config,
-          button_template: ev.detail.config
-        });
+        this._config = { ...this._config, button_template: ev.detail.config };
+        this._fireConfigChanged(this._config);
       });
 
       editorContainer.appendChild(this._cardEditorElement);
     } catch (err) {
-      console.error("Erreur sélecteur HA:", err);
-      editorContainer.innerHTML = `<p style="color:red;">Erreur de chargement de l'éditeur visuel.</p>`;
+      console.error("Erreur chargement sous-éditeur Lovelace:", err);
     }
   }
 
@@ -189,3 +168,159 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
+
+
+// ==========================================
+// 2. LA CARTE PRINCIPALE (ALL AREAS DISPLAY)
+// ==========================================
+class AllAreasDisplay extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("all-areas-display-editor");
+  }
+
+  static getStubConfig() {
+    return {
+      type: "custom:all-areas-display",
+      layout_type: "grid",
+      layout_options: { columns: 2 },
+      button_template: {
+        type: "tile",
+        name: "[[area_name]]",
+        icon: "[[area_icon]]"
+      }
+    };
+  }
+
+  setConfig(config) {
+    this._config = config;
+  }
+
+  set hass(hass) {
+    const oldHass = this._hass;
+    this._hass = hass;
+    
+    if (!this._config) return;
+
+    if (!this.content) {
+      this.innerHTML = `<div id="card-container"></div>`;
+      this.content = this.querySelector('#card-container');
+    }
+
+    if (this._layoutElement && oldHass && oldHass.areas === hass.areas && oldHass.states === hass.states) {
+      this._layoutElement.hass = hass;
+      return;
+    }
+
+    this._buildCards();
+  }
+
+  async _buildCards() {
+    const config = this._config;
+    const hass = this._hass;
+    const areas = Object.values(hass.areas || {});
+
+    if (areas.length === 0) {
+      this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce détectée.</ha-alert>`;
+      return;
+    }
+
+    const layoutConfig = {
+      type: config.layout_type || 'grid',
+      cards: []
+    };
+    
+    if (layoutConfig.type === 'grid') {
+      layoutConfig.columns = config.layout_options?.columns || 2;
+      layoutConfig.square = false;
+    }
+
+    let templateToUse = config.button_template || { type: "tile", name: "[[area_name]]" };
+
+    areas.forEach(area => {
+      const areaId = area.area_id;
+      const areaName = area.name;
+      const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
+      const areaIcon = area.icon || "mdi:home-outline";
+
+      let defaultEntity = "sun.sun"; 
+      const lightEntity = Object.values(hass.states).find(state => 
+        state.entity_id.startsWith('light.') && 
+        hass.entities[state.entity_id]?.area_id === areaId
+      );
+      if (lightEntity) {
+        defaultEntity = lightEntity.entity_id;
+      } else {
+        const switchEntity = Object.values(hass.states).find(state => 
+          (state.entity_id.startsWith('switch.') || state.entity_id.startsWith('input_boolean.')) && 
+          hass.entities[state.entity_id]?.area_id === areaId
+        );
+        if (switchEntity) defaultEntity = switchEntity.entity_id;
+      }
+
+      let areaTemp = "N/A";
+      const tempEntity = Object.values(hass.states).find(state => 
+        state.entity_id.startsWith('sensor.') && 
+        (state.entity_id.includes('temperature') || state.attributes.device_class === 'temperature') && 
+        hass.entities[state.entity_id]?.area_id === areaId
+      );
+      if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
+
+      let areaHumidity = "N/A";
+      const humEntity = Object.values(hass.states).find(state => 
+        state.entity_id.startsWith('sensor.') && 
+        (state.entity_id.includes('humidity') || state.attributes.device_class === 'humidity') && 
+        hass.entities[state.entity_id]?.area_id === areaId
+      );
+      if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
+
+      const replaceVariables = (obj) => {
+        let str = JSON.stringify(obj);
+        str = str.replaceAll('[[area_id]]', areaId);
+        str = str.replaceAll('[[area_name]]', areaName);
+        str = str.replaceAll('[[area_icon]]', areaIcon);
+        str = str.replaceAll('[[area_slug]]', areaSlug);
+        str = str.replaceAll('[[area_temp]]', areaTemp);
+        str = str.replaceAll('[[area_humidity]]', areaHumidity);
+        str = str.replaceAll('[[default_entity]]', defaultEntity);
+        return JSON.parse(str);
+      };
+
+      try {
+        layoutConfig.cards.push(replaceVariables(templateToUse));
+      } catch (e) {
+        console.error("Erreur parsing variables sur carte enfant:", e);
+      }
+    });
+
+    try {
+      const helpers = await window.loadCardHelpers();
+      const element = helpers.createCardElement(layoutConfig);
+      element.hass = hass;
+
+      this.content.innerHTML = '';
+      this.content.appendChild(element);
+      this._layoutElement = element;
+    } catch (err) {
+      console.error("Erreur rendu conteneur principal:", err);
+    }
+  }
+
+  getCardSize() {
+    return 4;
+  }
+}
+customElements.define('all-areas-display', AllAreasDisplay);
+
+
+// ==========================================
+// 3. ENREGISTREMENT CATALOGUE
+// ==========================================
+window.customCards = window.customCards || [];
+if (!window.customCards.some(c => c.type === 'all-areas-display')) {
+  window.customCards.push({
+    type: "all-areas-display",
+    name: "All areas display",
+    preview: true,
+    description: "Générateur automatique de tableaux de bord basés sur vos pièces Lovelace."
+  });
+}
