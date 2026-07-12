@@ -101,34 +101,43 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._cardYamlEditor.autofocus = false;
     yamlContainer.appendChild(this._cardYamlEditor);
 
-    // Écoute en temps réel des modifications du YAML (sans bouton)
+    // Écoute en temps réel et synchronisation immédiate avec l'éditeur global
     this._cardYamlEditor.addEventListener("value-changed", (e) => {
+      e.stopPropagation(); // Évite les boucles d'événements infinies
       this._handleYamlChange(e.detail.value);
     });
 
-    // Premier rendu du texte dans la boîte d'édition
+    // Premier rendu du texte proprement formaté
     setTimeout(() => {
       this._forceYamlDumpInEditor();
-    }, 150);
+    }, 200);
 
     this._updateUiFields();
   }
 
-  // Injecte la configuration actuelle dans la zone de texte
+  // Injecte proprement la configuration actuelle sous forme de vrai YAML indenté
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
+    
+    // On va chercher le parseur de Home Assistant ou jsyaml
     const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
 
     if (parser && typeof parser.dump === "function") {
       this._cardYamlEditor.value = parser.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
     } else {
+      // Fallback plus propre et indenté si le module met du temps à charger
       this._cardYamlEditor.value = Object.entries(currentCardConfig)
-        .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join('\n');
+        .map(([k, v]) => {
+          if (typeof v === 'object') {
+            return `${k}:\n` + Object.entries(v).map(([subK, subV]) => `  ${subK}: ${subV}`).join('\n');
+          }
+          return `${k}: ${v}`;
+        }).join('\n');
     }
   }
 
-  // Traitement en direct du changement YAML
+  // Traitement et synchronisation instantanée du YAML modifié vers la configuration générale
   _handleYamlChange(rawText) {
     const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
     if (!parser || typeof parser.load !== "function") return;
@@ -136,11 +145,18 @@ class AllAreasDisplayEditor extends HTMLElement {
     try {
       const parsedCard = parser.load(rawText);
       if (parsedCard && typeof parsedCard === 'object') {
+        // Met à jour la config locale
         this._config = { ...this._config, card: parsedCard };
-        this._fireConfigChanged();
+        
+        // Dispatche l'événement requis par Home Assistant pour mettre à jour l'éditeur principal
+        this.dispatchEvent(new CustomEvent("config-changed", {
+          detail: { config: this._config },
+          bubbles: true,
+          composed: true,
+        }));
       }
     } catch (err) {
-      // On ignore silencieusement pendant que l'utilisateur écrit pour éviter de bloquer la saisie
+      // On ignore l'erreur de syntaxe pendant la frappe (ex: l'utilisateur n'a pas fini d'écrire son bloc)
     }
   }
 
@@ -265,7 +281,6 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
-
 
 // ==========================================
 // 2. LA CARTE PRINCIPALE (MOTEUR GENERIQUE)
