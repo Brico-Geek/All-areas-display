@@ -14,8 +14,6 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   _render() {
-    // ÉTAPPE DE SÉCURITÉ CRITIQUE : Si l'éditeur est déjà injecté dans le DOM,
-    // on met juste à jour les valeurs sans toucher à la structure HTML.
     if (this._initialized) {
       this._updateValues();
       return;
@@ -26,14 +24,30 @@ class AllAreasDisplayEditor extends HTMLElement {
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
         
         <!-- SECTION 1 : DISPOSITION -->
-        <div style="display: flex; flex-direction: column; gap: 6px;">
-          <label style="font-weight: bold; color: var(--primary-text-color);">Disposition des pièces :</label>
-          <select id="layout-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
-            <option value="auto">Auto (S'adapte à l'espace disponible)</option>
-            <option value="grid">Grille (Grid)</option>
-            <option value="vertical">Vertical Stack</option>
-            <option value="horizontal">Horizontal Stack</option>
-          </select>
+        <div style="display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--divider-color); padding-bottom: 14px;">
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-weight: bold; color: var(--primary-text-color);">Disposition des pièces :</label>
+            <select id="layout-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
+              <option value="auto">Auto (Fluide et extensible)</option>
+              <option value="grid">Grille (Grid)</option>
+              <option value="vertical">Vertical Stack</option>
+              <option value="horizontal">Horizontal Stack</option>
+            </select>
+          </div>
+
+          <!-- Options dynamiques pour la Grille -->
+          <div id="grid-options" style="display: none; gap: 12px; align-items: center; margin-top: 6px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label style="color: var(--primary-text-color); font-size: 0.9em;">Colonnes :</label>
+              <input id="grid-columns" type="number" min="1" max="12" style="width: 50px; padding: 6px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);" />
+            </div>
+          </div>
+
+          <!-- Option Carré pour les affichages compatibles -->
+          <div id="square-option-container" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+            <input id="layout-square" type="checkbox" style="cursor: pointer;" />
+            <label for="layout-square" style="color: var(--primary-text-color); font-size: 0.9em; cursor: pointer;">Afficher les cartes en carré</label>
+          </div>
         </div>
 
         <!-- SECTION 2 : PIÈCES BANNIES -->
@@ -56,45 +70,31 @@ class AllAreasDisplayEditor extends HTMLElement {
       </div>
     `;
 
-    // Gestion du changement de disposition
-    this.querySelector("#layout-select").addEventListener("change", (ev) => {
-      const val = ev.target.value;
-      let newLayout = { type: "grid", columns: 2 };
-      
-      if (val === "vertical") newLayout = { type: "vertical-stack" };
-      else if (val === "horizontal") newLayout = { type: "horizontal-stack" };
-      else if (val === "auto") newLayout = { type: "grid", columns: null, square: false };
-      else if (val === "grid") newLayout = { type: "grid", columns: 2, square: false };
+    // Événements de l'interface graphique
+    this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutChange());
+    this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutChange());
+    this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutChange());
 
-      this._updateConfig({ layout: newLayout });
-    });
-
-    // Initialisation unique de l'éditeur de code
+    // Initialisation forcée de la zone de code en pur YAML
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
     
-    const initialCardConfig = this._config.card || { type: "tile", area: "this.area.id" };
+    const initialCardConfig = this._config.card || { type: "area", area: "this.area.id" };
     this._cardYamlEditor.value = window.jsyaml ? window.jsyaml.dump(initialCardConfig) : JSON.stringify(initialCardConfig, null, 2);
 
     this._cardYamlEditor.addEventListener("value-changed", (ev) => {
       ev.stopPropagation();
       try {
-        const parsedCard = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
-        if (parsedCard && typeof parsedCard === 'object') {
-          // On reconstruit une nouvelle config propre pour éviter les références circulaires
-          const updatedConfig = {
-            ...this._config,
-            card: parsedCard
-          };
-          this.dispatchEvent(new CustomEvent("config-changed", {
-            detail: { config: updatedConfig },
-            bubbles: true,
-            composed: true,
-          }));
+        if (window.jsyaml) {
+          const parsedCard = window.jsyaml.load(ev.detail.value);
+          if (parsedCard && typeof parsedCard === 'object') {
+            this._config.card = parsedCard;
+            this._fireConfigChanged();
+          }
         }
       } catch (err) {
-        // Mode silencieux pendant la saisie d'un YAML incomplet
+        // Reste silencieux pendant la frappe du YAML
       }
     });
 
@@ -102,15 +102,61 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateValues();
   }
 
+  _handleLayoutChange() {
+    const selectType = this.querySelector("#layout-select").value;
+    const isSquare = this.querySelector("#layout-square").checked;
+    let newLayout = { type: "grid" };
+
+    if (selectType === "vertical") {
+      newLayout = { type: "vertical-stack" };
+    } else if (selectType === "horizontal") {
+      newLayout = { type: "horizontal-stack" };
+    } else if (selectType === "auto") {
+      newLayout = { type: "auto" };
+    } else if (selectType === "grid") {
+      const cols = parseInt(this.querySelector("#grid-columns").value) || 2;
+      newLayout = { type: "grid", columns: cols };
+    }
+
+    // L'option square est gérée nativement par le grid HA
+    if (selectType === "grid" || selectType === "auto") {
+      newLayout.square = isSquare;
+    }
+
+    this._updateConfig({ layout: newLayout });
+  }
+
   _updateValues() {
     if (!this._config) return;
     const select = this.querySelector("#layout-select");
-    if (select && this._config.layout) {
-      const type = this._config.layout.type;
-      if (type === "vertical-stack") select.value = "vertical";
-      else if (type === "horizontal-stack") select.value = "horizontal";
-      else if (type === "grid" && this._config.layout.columns === null) select.value = "auto";
-      else select.value = "grid";
+    const gridOptions = this.querySelector("#grid-options");
+    const squareContainer = this.querySelector("#square-option-container");
+    const colsInput = this.querySelector("#grid-columns");
+    const squareCheckbox = this.querySelector("#layout-square");
+
+    if (!select) return;
+
+    const layout = this._config.layout || { type: "auto" };
+    
+    if (layout.type === "vertical-stack") {
+      select.value = "vertical";
+      gridOptions.style.display = "none";
+      squareContainer.style.display = "none";
+    } else if (layout.type === "horizontal-stack") {
+      select.value = "horizontal";
+      gridOptions.style.display = "none";
+      squareContainer.style.display = "none";
+    } else if (layout.type === "grid") {
+      select.value = "grid";
+      gridOptions.style.display = "flex";
+      squareContainer.style.display = "flex";
+      colsInput.value = layout.columns || 2;
+      squareCheckbox.checked = layout.square || false;
+    } else {
+      select.value = "auto";
+      gridOptions.style.display = "none";
+      squareContainer.style.display = "flex"; // Autorise le mode carré en mode auto flexible
+      squareCheckbox.checked = layout.square || false;
     }
   }
 
@@ -155,6 +201,10 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   _updateConfig(newProps) {
     this._config = { ...this._config, ...newProps };
+    this._fireConfigChanged();
+  }
+
+  _fireConfigChanged() {
     this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: this._config },
       bubbles: true,
@@ -177,13 +227,11 @@ class AllAreasDisplay extends HTMLElement {
     return {
       type: "custom:all-areas-display",
       layout: {
-        type: "grid",
-        columns: 2,
-        square: false
+        type: "auto"
       },
       exclude: [],
       card: {
-        type: "tile",
+        type: "area",
         area: "this.area.id"
       }
     };
@@ -230,22 +278,17 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
-    // 2. Traitement de la disposition (Mise en page)
-    const userLayout = config.layout || { type: "grid", columns: 2 };
-    const layoutConfig = { ...userLayout, cards: [] };
+    const userLayout = config.layout || { type: "auto" };
+    this.content.innerHTML = '';
 
-    if (userLayout.type === "grid" && userLayout.columns === null) {
-      delete layoutConfig.columns;
-    }
-
-    // 3. Générer les cartes pour chaque pièce
+    // 2. Traitement de la génération des cartes enfants
+    const childCardsRaw = [];
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name || areaId;
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
-      // Recherche de l'entité par défaut (Light > Switch > Sun)
       let defaultEntity = "sun.sun"; 
       const lightEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('light.') && hass.entities[state.entity_id]?.area_id === areaId
@@ -260,7 +303,6 @@ class AllAreasDisplay extends HTMLElement {
         if (switchEntity) defaultEntity = switchEntity.entity_id;
       }
 
-      // Extraction température & humidité
       let areaTemp = "N/A";
       const tempEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
@@ -287,7 +329,6 @@ class AllAreasDisplay extends HTMLElement {
         humidity: areaHumidity
       };
 
-      // Remplacement des variables "this.area.xxx"
       const processCard = (obj) => {
         let str = JSON.stringify(obj);
         str = str.replaceAll('this.area.id', areaData.id);
@@ -302,22 +343,53 @@ class AllAreasDisplay extends HTMLElement {
 
       if (config.card) {
         try {
-          layoutConfig.cards.push(processCard(config.card));
+          childCardsRaw.push(processCard(config.card));
         } catch (e) {
           console.error("Erreur template All Areas Display :", e);
         }
       }
     });
 
-    // 4. Rendu final du bloc
+    // 3. Rendu selon la disposition choisie
     try {
       const helpers = await window.loadCardHelpers();
-      const element = helpers.createCardElement(layoutConfig);
-      element.hass = hass;
 
-      this.content.innerHTML = '';
-      this.content.appendChild(element);
-      this._layoutElement = element;
+      if (userLayout.type === "auto") {
+        // MODE AUTO FLEXIBLE ET EXTENSIBLE
+        // On génère un wrapper div avec flexbox élastique
+        const flexWrapper = document.createElement("div");
+        flexWrapper.style.display = "flex";
+        flexWrapper.style.flexWrap = "wrap";
+        flexWrapper.style.gap = "8px";
+        flexWrapper.style.width = "100%";
+
+        for (const cardConfig of childCardsRaw) {
+          const cardEl = helpers.createCardElement(cardConfig);
+          cardEl.hass = hass;
+          
+          // Force chaque carte à s'étirer (flex-grow: 1) tout en gardant une taille de base (150px)
+          cardEl.style.flex = "1 1 150px";
+          cardEl.style.minWidth = "150px";
+          
+          if (userLayout.square) {
+            cardEl.style.aspectRatio = "1 / 1";
+          }
+          
+          flexWrapper.appendChild(cardEl);
+        }
+        
+        this.content.appendChild(flexWrapper);
+        this._layoutElement = flexWrapper;
+
+      } else {
+        // MODES STANDARD (GRID, VERTICAL, HORIZONTAL STACK) via Lovelace
+        const layoutConfig = { ...userLayout, cards: childCardsRaw };
+        const element = helpers.createCardElement(layoutConfig);
+        element.hass = hass;
+        
+        this.content.appendChild(element);
+        this._layoutElement = element;
+      }
     } catch (err) {
       console.error("Erreur de rendu du container principal :", err);
     }
