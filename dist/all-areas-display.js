@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR DE CODE (STYLE AUTO-ENTITIES)
+// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -9,41 +9,147 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._yamlEditor) this._yamlEditor.hass = hass;
+    if (this._cardYamlEditor) this._cardYamlEditor.hass = hass;
+    this._updateExcludedCheckboxes();
   }
 
   _render() {
-    if (this._yamlEditor) return;
+    if (this._initialized) {
+      this._updateValues();
+      return;
+    }
+    this._initialized = true;
 
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 10px;">
-        <h3 style="margin: 0; color: var(--primary-color);">Configuration All Areas Display</h3>
-        <p style="margin: 0 0 10px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Configurez votre carte en pur YAML. Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>, etc.
-        </p>
-        <div id="yaml-editor-container"></div>
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
+        
+        <!-- SECTION 1 : DISPOSITION -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-weight: bold; color: var(--primary-text-color);">Disposition des pièces :</label>
+          <select id="layout-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);">
+            <option value="auto">Auto (S'adapte à l'espace disponible)</option>
+            <option value="grid">Grille (Grid)</option>
+            <option value="vertical">Vertical Stack</option>
+            <option value="horizontal">Horizontal Stack</option>
+          </select>
+        </div>
+
+        <!-- SECTION 2 : PIÈCES BANNIES -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-weight: bold; color: var(--primary-text-color);">Pièces bannies (Masquées) :</label>
+          <div id="excluded-areas-container" style="max-height: 120px; overflow-y: auto; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary-background-color);">
+            <!-- Rempli dynamiquement par JS -->
+          </div>
+        </div>
+
+        <!-- SECTION 3 : ZONE DE COPIER-COLLER YAML DE LA CARTE ENFANT -->
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <label style="font-weight: bold; color: var(--primary-text-color);">Modèle de la carte (YAML) :</label>
+          <p style="margin: 0 0 4px 0; font-size: 0.85em; color: var(--secondary-text-color);">
+            Collez ici le YAML d'une carte classique. Remplacez les valeurs par <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>, etc.
+          </p>
+          <div id="card-yaml-editor-container"></div>
+        </div>
+
       </div>
     `;
 
-    const container = this.querySelector("#yaml-editor-container");
+    // Événement sur le changement de disposition
+    this.querySelector("#layout-select").addEventListener("change", (ev) => {
+      const val = ev.target.value;
+      let newLayout = { type: "grid", columns: 2 }; // Fallback
+      
+      if (val === "vertical") newLayout = { type: "vertical-stack" };
+      else if (val === "horizontal") newLayout = { type: "horizontal-stack" };
+      else if (val === "auto") newLayout = { type: "grid", columns: null, square: false }; // Auto masonry/grid sans colonnes strictes
+      else if (val === "grid") newLayout = { type: "grid", columns: 2, square: false };
 
-    this._yamlEditor = document.createElement("ha-code-editor");
-    this._yamlEditor.mode = "yaml";
-    this._yamlEditor.value = window.jsyaml ? window.jsyaml.dump(this._config) : JSON.stringify(this._config, null, 2);
-
-    this._yamlEditor.addEventListener("value-changed", (ev) => {
-      ev.stopPropagation();
-      try {
-        const parsedConfig = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
-        this.dispatchEvent(new CustomEvent("config-changed", {
-          detail: { config: parsedConfig },
-          bubbles: true,
-          composed: true,
-        }));
-      } catch (err) {}
+      this._updateConfig({ layout: newLayout });
     });
 
-    container.appendChild(this._yamlEditor);
+    // Initialisation de la zone d'édition YAML (uniquement pour la sous-carte)
+    const yamlContainer = this.querySelector("#card-yaml-editor-container");
+    this._cardYamlEditor = document.createElement("ha-code-editor");
+    this._cardYamlEditor.mode = "yaml";
+    
+    const initialCardConfig = this._config.card || { type: "tile", area: "this.area.id" };
+    this._cardYamlEditor.value = window.jsyaml ? window.jsyaml.dump(initialCardConfig) : JSON.stringify(initialCardConfig, null, 2);
+
+    this._cardYamlEditor.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
+      try {
+        const parsedCard = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
+        this._updateConfig({ card: parsedCard });
+      } catch (err) {
+        // En cours de saisie, syntaxe YAML incomplète ignorée temporairement
+      }
+    });
+
+    yamlContainer.appendChild(this._cardYamlEditor);
+    this._updateValues();
+  }
+
+  _updateValues() {
+    if (!this._config) return;
+    
+    // Aligner le selecteur visuel avec la config actuelle
+    const select = this.querySelector("#layout-select");
+    if (select && this._config.layout) {
+      const type = this._config.layout.type;
+      if (type === "vertical-stack") select.value = "vertical";
+      else if (type === "horizontal-stack") select.value = "horizontal";
+      else if (type === "grid" && this._config.layout.columns === null) select.value = "auto";
+      else select.value = "grid";
+    }
+  }
+
+  _updateExcludedCheckboxes() {
+    const container = this.querySelector("#excluded-areas-container");
+    if (!container || !this._hass || !this._hass.areas) return;
+
+    const currentExclusions = (this._config.exclude || []).map(item => String(item).toLowerCase());
+    const areas = Object.values(this._hass.areas);
+
+    // Éviter de ré-injecter si le nombre d'éléments n'a pas bougé
+    if (container.children.length === areas.length) return;
+
+    container.innerHTML = "";
+    areas.sort((a, b) => (a.name || "").localeCompare(b.name || "")).forEach(area => {
+      const label = document.createElement("label");
+      label style.display = "flex";
+      label.style.alignItems = "center";
+      label.style.gap = "8px";
+      label.style.color = "var(--primary-text-color)";
+      label.style.fontSize = "0.95em";
+      label.style.cursor = "pointer";
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.checked = currentExclusions.includes(area.area_id.toLowerCase()) || (area.name && currentExclusions.includes(area.name.toLowerCase()));
+      
+      checkbox.addEventListener("change", () => {
+        let exclusions = [...(this._config.exclude || [])];
+        if (checkbox.checked) {
+          if (!exclusions.includes(area.area_id)) exclusions.push(area.area_id);
+        } else {
+          exclusions = exclusions.filter(item => item.toLowerCase() !== area.area_id.toLowerCase() && (area.name ? item.toLowerCase() !== area.name.toLowerCase() : true));
+        }
+        this._updateConfig({ exclude: exclusions });
+      });
+
+      label.appendChild(checkbox);
+      label.appendChild(document.createTextNode(area.name || area.area_id));
+      container.appendChild(label);
+    });
+  }
+
+  _updateConfig(newProps) {
+    this._config = { ...this._config, ...newProps };
+    this.dispatchEvent(new CustomEvent("config-changed", {
+      detail: { config: this._config },
+      bubbles: true,
+      composed: true,
+    }));
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
@@ -102,7 +208,7 @@ class AllAreasDisplay extends HTMLElement {
     let areas = Object.values(hass.areas || {});
     
     // 1. Filtrer les exclusions (par ID ou par Nom)
-    const excludeList = (config.exclude || []).map(item => item.toLowerCase());
+    const excludeList = (config.exclude || []).map(item => String(item).toLowerCase());
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
       const nameMatch = area.name ? excludeList.includes(area.name.toLowerCase()) : false;
@@ -114,11 +220,15 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
-    // 2. Préparer la structure de mise en page (grid, vertical-stack, etc.)
-    const layoutConfig = {
-      ...(config.layout || { type: "grid", columns: 2 }),
-      cards: []
-    };
+    // 2. Traitement de la disposition (Mise en page)
+    const userLayout = config.layout || { type: "grid", columns: 2 };
+    const layoutConfig = { ...userLayout, cards: [] };
+
+    // Si le mode choisi est "auto" (représenté par columns: null dans notre éditeur)
+    if (userLayout.type === "grid" && userLayout.columns === null) {
+      // Version fluide utilisant la grille native sans forcer un nombre fixe de colonnes
+      delete layoutConfig.columns;
+    }
 
     // 3. Générer les cartes pour chaque pièce
     areas.forEach(area => {
