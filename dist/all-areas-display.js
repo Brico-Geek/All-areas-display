@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI PROTECTION GLOBALE)
+// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   async setConfig(config) {
@@ -23,7 +23,6 @@ class AllAreasDisplayEditor extends HTMLElement {
       return;
     }
 
-    // Structure HTML d'origine respectée à 100% pour ne pas perturber l'initialisation de Home Assistant
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
         <h3 style="margin: 0; color: var(--primary-color);">Configuration de la Mise en Page</h3>
@@ -36,82 +35,17 @@ class AllAreasDisplayEditor extends HTMLElement {
           Configurez ici la carte unique qui sera dupliquée pour chaque pièce détectée.
         </p>
         
-        <!-- Zone d'injection préservée pour l'éditeur natif -->
         <div id="card-editor-container"></div>
 
-        <!-- Les outils personnalisés sont placés APRÈS, en isolation complète -->
-        <div id="luma-custom-tools" style="display: flex; flex-direction: column; gap: 15px; margin-top: 10px;">
-          <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-weight: bold; font-size: 0.85em; color: var(--primary-text-color);">Changer le type de carte visuelle :</label>
-            <select id="quick-card-type-selector" style="padding: 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
-              <option value="">-- Choisir un modèle de base --</option>
-              <option value="tile">Tuile (Tile)</option>
-              <option value="button">Bouton (Button)</option>
-              <option value="custom:mushroom-template-card">Mushroom Template</option>
-              <option value="custom:mushroom-chips-card">Mushroom Chips</option>
-            </select>
-          </div>
-
-          <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 12px; border-radius: 6px; border: 1px dashed var(--divider-color);">
-            <strong style="display: block; margin-bottom: 6px;">Variables (Cliquez pour copier instantanément) :</strong>
-            <div style="display: flex; flex-wrap: wrap; gap: 6px;" id="variable-badges">
-              <span class="var-badge" data-var="[[area_name]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_name]]</span>
-              <span class="var-badge" data-var="[[area_icon]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_icon]]</span>
-              <span class="var-badge" data-var="[[area_id]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_id]]</span>
-              <span class="var-badge" data-var="[[area_slug]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_slug]]</span>
-              <span class="var-badge" data-var="[[area_temp]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_temp]]</span>
-              <span class="var-badge" data-var="[[area_humidity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[area_humidity]]</span>
-              <span class="var-badge" data-var="[[default_entity]]" style="cursor:pointer; background: var(--primary-color); color: white; padding: 3px 8px; border-radius: 4px; font-family: monospace;">[[default_entity]]</span>
-            </div>
-          </div>
+        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 10px; border-radius: 6px;">
+          <strong>Variables dynamiques utilisables :</strong><br>
+          <code>[[area_name]]</code>, <code>[[area_icon]]</code>, <code>[[area_id]]</code>, <code>[[area_slug]]</code>, <code>[[area_temp]]</code>, <code>[[area_humidity]]</code>, <code>[[default_entity]]</code>
         </div>
       </div>
     `;
 
     this._layoutFormElement = this.querySelector("#layout-form");
     const editorContainer = this.querySelector("#card-editor-container");
-    const quickSelector = this.querySelector("#quick-card-type-selector");
-
-    // Écouteur du sélecteur rapide de type de carte
-    quickSelector.addEventListener("change", (ev) => {
-      const selectedType = ev.target.value;
-      if (!selectedType) return;
-
-      let baseConfig = { type: selectedType };
-      
-      if (selectedType === "tile" || selectedType === "button") {
-        baseConfig.entity = "[[default_entity]]";
-        baseConfig.name = "[[area_name]]";
-        baseConfig.icon = "[[area_icon]]";
-      } else if (selectedType.includes("mushroom-template")) {
-        baseConfig.primary = "[[area_name]]";
-        baseConfig.secondary = "[[area_temp]]";
-        baseConfig.icon = "[[area_icon]]";
-      }
-
-      if (this._cardEditorElement) {
-        this._cardEditorElement.value = baseConfig;
-      }
-      
-      this._fireConfigChanged({
-        ...this._config,
-        button_template: baseConfig
-      });
-      
-      quickSelector.value = ""; 
-    });
-
-    // Écouteur des badges cliquables
-    this.querySelectorAll(".var-badge").forEach(badge => {
-      badge.addEventListener("click", () => {
-        const textToCopy = badge.getAttribute("data-var");
-        navigator.clipboard.writeText(textToCopy);
-        
-        const originalBackground = badge.style.background;
-        badge.style.background = "var(--success-color, #4caf50)";
-        setTimeout(() => { badge.style.background = originalBackground; }, 700);
-      });
-    });
 
     const layoutSchema = [
       {
@@ -219,6 +153,7 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   setConfig(config) {
+    // Suppression complète de l'ancienne vérification stricte "card_template"
     this._config = config;
   }
 
@@ -261,6 +196,7 @@ class AllAreasDisplay extends HTMLElement {
       layoutConfig.square = false;
     }
 
+    // Sécurité si aucun template n'est encore enregistré
     let templateToUse = config.button_template || { type: "tile", name: "[[area_name]]" };
 
     areas.forEach(area => {
@@ -269,6 +205,7 @@ class AllAreasDisplay extends HTMLElement {
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
+      // Recherche d'entité par défaut
       let defaultEntity = "sun.sun"; 
       const lightEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('light.') && 
@@ -284,6 +221,7 @@ class AllAreasDisplay extends HTMLElement {
         if (switchEntity) defaultEntity = switchEntity.entity_id;
       }
 
+      // Capteurs Temp / Humidité
       let areaTemp = "N/A";
       const tempEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
@@ -300,6 +238,7 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
 
+      // Remplacement propre des variables
       const replaceVariables = (obj) => {
         let str = JSON.stringify(obj);
         str = str.replaceAll('[[area_id]]', areaId);
