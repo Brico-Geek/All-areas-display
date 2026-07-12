@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL NATIF ET AVANCÉ (GUI)
+// 1. L'ÉDITEUR VISUEL ET PARAMÉTRAGE (GUI)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -11,133 +11,131 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._hass = hass;
     if (this._formElement) {
       this._formElement.hass = hass;
-      this._updateFormSchema(); // Ajuster le schéma si la config ou le mode change
-    }
-    if (this._cardPicker) {
-      this._cardPicker.hass = hass;
     }
   }
 
   _render() {
-    if (this._formElement) return;
+    // Éviter de recréer l'interface inutilement à chaque cycle
+    if (this.querySelector("#layout-form")) {
+      this._updateFormSchema();
+      return;
+    }
 
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px;">
-        <h3 style="margin: 0; color: var(--primary-color); font-size: 1.1em;">Mise en Page Globale</h3>
-        <ha-form id="layout-form"></ha-form>
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
         
-        <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 5px 0;">
+        <div>
+          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">1. Disposition Globale</h3>
+          <ha-form id="layout-form"></ha-form>
+        </div>
         
-        <h3 style="margin: 0; color: var(--primary-color); font-size: 1.1em;">Éléments à répéter par pièce</h3>
-        <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Ajoute un ou plusieurs éléments (Bouton, Popup, Tuile, etc.). Ils seront dupliqués automatiquement dans chaque pièce avec leurs variables.
-        </p>
+        <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
-        <!-- Zone d'affichage des sous-cartes déjà configurées -->
-        <div id="cards-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+        <div>
+          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Éléments par pièce</h3>
+          <p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--secondary-text-color);">
+            Ajoute les composants qui seront répétés dans chaque pièce (ex: Bouton + Popup au même endroit).
+          </p>
+          
+          <!-- Liste des cartes configurées -->
+          <div id="cards-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px;"></div>
 
-        <!-- Le sélecteur officiel de cartes de Home Assistant -->
-        <div style="border: 1px dashed var(--divider-color); padding: 15px; border-radius: 8px; text-align: center;">
-          <h4 style="margin: 0 0 10px 0; font-size: 0.9em;">Ajouter un élément par pièce :</h4>
-          <hui-card-picker id="card-picker"></hui-card-picker>
+          <!-- Sélecteur d'ajout rapide -->
+          <div style="display: flex; gap: 10px; align-items: center; background: var(--secondary-background-color); padding: 12px; border-radius: 8px; border: 1px dashed var(--divider-color);">
+            <ha-select id="card-type-selector" label="Ajouter un composant" style="flex-grow: 1;">
+              <mwc-list-item value="tile">Carte Tuile (Tile)</mwc-list-item>
+              <mwc-list-item value="button">Carte Bouton (Button)</mwc-list-item>
+              <mwc-list-item value="entities">Carte Entités (Entities)</mwc-list-item>
+              <mwc-list-item value="custom:mushroom-chips-card">Mushroom Chips (Si installé)</mwc-list-item>
+              <mwc-list-item value="custom:bubble-card">Bubble Card Pop-up (Si installé)</mwc-list-item>
+            </ha-select>
+            <ha-icon-button id="add-card-btn" icon="mdi:plus" style="color: var(--primary-color);"></ha-icon-button>
+          </div>
         </div>
 
-        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 10px; border-radius: 6px;">
-          <strong>Variables injectées automatiquement :</strong><br>
-          <code>[[area_name]]</code>, <code>[[area_icon]]</code>, <code>[[area_slug]]</code>, <code>[[area_temp]]</code>, <code>[[area_humidity]]</code>, <code>[[default_entity]]</code>
+        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.5; background: var(--secondary-background-color); padding: 12px; border-radius: 8px; border: 1px solid var(--divider-color);">
+          <strong>💡 Variables magiques utilisables :</strong><br>
+          <code>[[area_name]]</code>, <code>[[area_icon]]</code>, <code>[[default_entity]]</code>, <code>[[area_temp]]</code>, <code>[[area_humidity]]</code>
         </div>
       </div>
     `;
 
     this._formElement = this.querySelector("#layout-form");
-    this._cardPicker = this.querySelector("#card-picker");
+    this._selector = this.querySelector("#card-type-selector");
+    this._addButton = this.querySelector("#add-card-btn");
 
-    this._updateFormSchema();
-
-    // Gestion du changement de mise en page (Grille, Vertical, Horizontal)
+    // Événement sur le changement de la mise en page
     this._formElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
+      let targetLayout = value.layout_type;
       
-      let targetType = "grid";
-      if (value.layout_type === "horizontal") targetType = "horizontal-stack";
-      if (value.layout_type === "vertical") targetType = "vertical-stack";
-
       const newConfig = {
         ...this._config,
-        layout_type: targetType,
+        layout_type: targetLayout,
         layout_options: {
-          ...this._config?.layout_options,
-          columns: targetType === "grid" ? Math.max(2, value.columns || 2) : undefined
+          columns: targetLayout === "grid" ? Math.max(2, value.columns || 2) : undefined
         }
       };
       this._fireConfigChanged(newConfig);
     });
 
-    // Gestion de la sélection d'une nouvelle carte via le hui-card-picker
-    this._cardPicker.addEventListener("config-changed", (ev) => {
-      ev.stopPropagation();
-      const cardConfig = ev.detail.config;
-      if (!cardConfig) return;
+    // Événement d'ajout d'une carte
+    this._addButton.addEventListener("click", () => {
+      const type = this._selector.value;
+      if (!type) return;
 
-      // Récupérer le tableau de templates existants ou en créer un nouveau
       const templates = [...(this._config?.templates || [])];
-      templates.push(cardConfig);
-
-      const newConfig = {
-        ...this._config,
-        templates: templates
-      };
       
-      // Réinitialiser le sélecteur après l'ajout
-      this._cardPicker.value = "";
-      this._fireConfigChanged(newConfig);
+      // Configuration par défaut selon le type choisi
+      let newCardConfig = { type: type };
+      if (type === "tile" || type === "button") {
+        newCardConfig.entity = "[[default_entity]]";
+        newCardConfig.name = "[[area_name]]";
+      }
+
+      templates.push(newCardConfig);
+      this._fireConfigChanged({ ...this._config, templates });
+      this._selector.value = ""; // Reset
     });
+
+    this._updateFormSchema();
   }
 
   _updateFormSchema() {
     if (!this._formElement) return;
 
-    // Déterminer le type d'affichage actuel pour l'état du formulaire
-    let currentLayout = "grid";
-    if (this._config?.layout_type === "horizontal-stack") currentLayout = "horizontal";
-    if (this._config?.layout_type === "vertical-stack") currentLayout = "vertical";
+    const currentLayout = this._config?.layout_type || "grid";
 
-    // Construction dynamique du schéma
     const schema = [
       {
         name: "layout_type",
-        label: "Type d'affichage",
+        label: "Mode d'alignement des pièces",
         type: "select",
         options: [
-          ["grid", "Grille (Grid)"],
-          ["horizontal", "Alignement Horizontal (Stack)"],
-          ["vertical", "Alignement Vertical (Stack)"]
-        ],
-        default: "grid"
+          ["grid", "Grille dynamique (Grid)"],
+          ["horizontal-stack", "Colonne horizontale (Horizontal Stack)"],
+          ["vertical-stack", "Colonne verticale (Vertical Stack)"]
+        ]
       }
     ];
 
-    // On ajoute le champ colonne UNIQUEMENT si on est en mode Grid
+    // LA CONDITION : On affiche "Colonnes" UNIQUEMENT si "grid" est sélectionné
     if (currentLayout === "grid") {
       schema.push({
         name: "columns",
         label: "Nombre de colonnes (Minimum 2)",
         type: "integer",
         default: 2,
-        valueMin: 2,
-        valueMax: 6
+        valueMin: 2
       });
     }
 
-    const data = {
+    this._formElement.schema = schema;
+    this._formElement.data = {
       layout_type: currentLayout,
-      columns: Math.max(2, this._config?.layout_options?.columns || 2)
+      columns: this._config?.layout_options?.columns || 2
     };
 
-    this._formElement.schema = schema;
-    this._formElement.data = data;
-
-    // Rendu de la liste des cartes ajoutées pour pouvoir les supprimer
     this._renderCardsList();
   }
 
@@ -147,44 +145,48 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     const templates = this._config?.templates || [];
     if (templates.length === 0) {
-      listContainer.innerHTML = `<div style="font-size: 0.9em; color: var(--secondary-text-color); font-style: italic; text-align: center; padding: 10px;">Aucun élément configuré. Utilisez le sélecteur ci-dessous.</div>`;
+      listContainer.innerHTML = `
+        <div style="font-size: 0.9em; color: var(--secondary-text-color); font-style: italic; text-align: center; padding: 15px; border: 1px dashed var(--divider-color); border-radius: 6px;">
+          Aucun élément configuré pour le moment.
+        </div>`;
       return;
     }
 
     listContainer.innerHTML = "";
     templates.forEach((tpl, index) => {
-      const cardRow = document.createElement("div");
-      cardRow.style = "display: flex; justify-content: space-between; align-items: center; background: var(--secondary-background-color); padding: 8px 12px; border-radius: 6px; border: 1px solid var(--divider-color);";
-      cardRow.innerHTML = `
-        <span style="font-size: 0.9em; font-weight: bold;">#${index + 1} - ${tpl.type}</span>
-        <button style="background: var(--error-color); color: white; border: none; border-radius: 4px; padding: 4px 8px; cursor: pointer; font-size: 0.8em;">Supprimer</button>
+      const row = document.createElement("div");
+      row.style = "display: flex; justify-content: space-between; align-items: center; background: var(--card-background-color); padding: 10px; border-radius: 6px; border: 1px solid var(--divider-color);";
+      row.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <span style="font-size: 0.9em; font-weight: 500;">Composant #${index + 1}</span>
+          <code style="font-size: 0.8em; color: var(--primary-color);">${tpl.type}</code>
+        </div>
+        <ha-icon-button class="delete-btn" icon="mdi:delete" style="color: var(--error-color);"></ha-icon-button>
       `;
 
-      cardRow.querySelector("button").addEventListener("click", () => {
+      row.querySelector(".delete-btn").addEventListener("click", () => {
         const newTemplates = [...templates];
         newTemplates.splice(index, 1);
-        const newConfig = { ...this._config, templates: newTemplates };
-        this._fireConfigChanged(newConfig);
+        this._fireConfigChanged({ ...this._config, templates: newTemplates });
       });
 
-      listContainer.appendChild(cardRow);
+      listContainer.appendChild(row);
     });
   }
 
   _fireConfigChanged(newConfig) {
-    const event = new CustomEvent("config-changed", {
+    this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: newConfig },
       bubbles: true,
       composed: true,
-    });
-    this.dispatchEvent(event);
+    }));
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LA CARTE PRINCIPALE (ALL AREAS DISPLAY)
+// 2. LE COMPOSANT D'AFFICHAGE PRINCIPAL
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -200,8 +202,7 @@ class AllAreasDisplay extends HTMLElement {
         {
           type: "tile",
           entity: "[[default_entity]]",
-          name: "[[area_name]]",
-          icon: "[[area_icon]]"
+          name: "[[area_name]]"
         }
       ]
     };
@@ -212,17 +213,12 @@ class AllAreasDisplay extends HTMLElement {
     if (!this._config) return;
 
     if (!this.content) {
-      this.innerHTML = `<div id="card-container"></div>`;
-      this.content = this.querySelector('#card-container');
+      this.innerHTML = `<div id="root"></div>`;
+      this.content = this.querySelector('#root');
+      this._buildCards();
+    } else if (this._layoutElement) {
+      this._layoutElement.hass = hass;
     }
-
-    if (this._initialized) {
-      if (this._layoutElement) this._layoutElement.hass = hass;
-      return;
-    }
-    this._initialized = true;
-
-    this._buildCards();
   }
 
   async _buildCards() {
@@ -231,96 +227,81 @@ class AllAreasDisplay extends HTMLElement {
     const areas = Object.values(hass.areas || {});
     const templates = config.templates || [];
 
-    // Conteneur principal (Grille, Vertical Stack, ou Horizontal Stack)
-    const layoutConfig = {
+    // Configuration structurelle globale
+    const mainLayoutConfig = {
       type: config.layout_type || 'grid',
       cards: []
     };
     
-    if (layoutConfig.type === 'grid') {
-      layoutConfig.columns = Math.max(2, config.layout_options?.columns || 2);
-      layoutConfig.square = config.layout_options?.square || false;
+    if (mainLayoutConfig.type === 'grid') {
+      mainLayoutConfig.columns = Math.max(2, config.layout_options?.columns || 2);
     }
 
-    // Boucler sur chaque pièce
+    // Génération itérative par zone
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name;
-      const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
+      const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
 
-      // 🔍 1. Entité par défaut (Lumière / Switch)
-      let defaultEntity = "sun.sun"; 
-      const lightEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('light.') && 
-        hass.entities[state.entity_id]?.area_id === areaId
+      // Extraction automatique des entités référencées dans la pièce
+      let defaultEntity = "sun.sun";
+      const matchCard = Object.values(hass.states).find(s => 
+        (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.')) && 
+        hass.entities[s.entity_id]?.area_id === areaId
       );
-      if (lightEntity) {
-        defaultEntity = lightEntity.entity_id;
-      } else {
-        const switchEntity = Object.values(hass.states).find(state => 
-          (state.entity_id.startsWith('switch.') || state.entity_id.startsWith('input_boolean.')) && 
-          hass.entities[state.entity_id]?.area_id === areaId
-        );
-        if (switchEntity) defaultEntity = switchEntity.entity_id;
-      }
+      if (matchCard) defaultEntity = matchCard.entity_id;
 
-      // 🌡️ 2. Température
       let areaTemp = "N/A";
-      const tempEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('sensor.') && 
-        (state.entity_id.includes('temperature') || state.attributes.device_class === 'temperature') && 
-        hass.entities[state.entity_id]?.area_id === areaId
+      const tSensor = Object.values(hass.states).find(s => 
+        s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'temperature' && 
+        hass.entities[s.entity_id]?.area_id === areaId
       );
-      if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
+      if (tSensor) areaTemp = tSensor.state + (tSensor.attributes.unit_of_measurement || '°C');
 
-      // 💧 3. Humidité
       let areaHumidity = "N/A";
-      const humEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('sensor.') && 
-        (state.entity_id.includes('humidity') || state.attributes.device_class === 'humidity') && 
-        hass.entities[state.entity_id]?.area_id === areaId
+      const hSensor = Object.values(hass.states).find(s => 
+        s.entity_id.startsWith('sensor.') && s.attributes.device_class === 'humidity' && 
+        hass.entities[s.entity_id]?.area_id === areaId
       );
-      if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
+      if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
 
-      // Si l'utilisateur veut mettre plusieurs éléments au même endroit (Bouton + Popup),
-      // on doit regrouper ces éléments dans un sous-conteneur vertical pour la pièce
-      const areaContainer = {
+      // Le conteneur interne qui empile les multi-éléments (Bouton + Popup par exemple) au même endroit
+      const localStack = {
         type: "vertical-stack",
         cards: []
       };
 
-      // Remplacement des variables
-      const replaceVariables = (obj) => {
-        let str = JSON.stringify(obj);
-        str = str.replaceAll('[[area_id]]', areaId);
-        str = str.replaceAll('[[area_name]]', areaName);
-        str = str.replaceAll('[[area_icon]]', areaIcon);
-        str = str.replaceAll('[[area_slug]]', areaSlug);
-        str = str.replaceAll('[[area_temp]]', areaTemp);
-        str = str.replaceAll('[[area_humidity]]', areaHumidity);
-        str = str.replaceAll('[[default_entity]]', defaultEntity);
-        return JSON.parse(str);
+      // Remplacement propre des chaînes de caractères de variables
+      const bindVariables = (tpl) => {
+        let raw = JSON.stringify(tpl);
+        raw = raw.replaceAll('[[area_id]]', areaId)
+                 .replaceAll('[[area_name]]', areaName)
+                 .replaceAll('[[area_icon]]', areaIcon)
+                 .replaceAll('[[area_slug]]', areaSlug)
+                 .replaceAll('[[area_temp]]', areaTemp)
+                 .replaceAll('[[area_humidity]]', areaHumidity)
+                 .replaceAll('[[default_entity]]', defaultEntity);
+        return JSON.parse(raw);
       };
 
-      // Remplir le sous-conteneur de la pièce avec tous les templates choisis
       templates.forEach(tpl => {
-        areaContainer.cards.push(replaceVariables(tpl));
+        localStack.cards.push(bindVariables(tpl));
       });
 
-      // Si on a des éléments configurés, on les pousse dans l'affichage global
-      if (areaContainer.cards.length > 0) {
-        // Si un seul élément est demandé, pas besoin du vertical-stack intermédiaire
-        if (areaContainer.cards.length === 1) {
-          layoutConfig.cards.push(areaContainer.cards[0]);
+      // Injection dans la structure racine si la pièce contient des éléments
+      if (localStack.cards.length > 0) {
+        if (localStack.cards.length === 1) {
+          mainLayoutConfig.cards.push(localStack.cards[0]);
         } else {
-          layoutConfig.cards.push(areaContainer);
+          mainLayoutConfig.cards.push(localStack);
         }
       }
     });
 
+    // Instanciation via le moteur de rendu natif Lovelace
     const helpers = await window.loadCardHelpers();
-    const element = helpers.createCardElement(layoutConfig);
+    const element = helpers.createCardElement(mainLayoutConfig);
     element.hass = hass;
 
     this.content.innerHTML = '';
@@ -329,26 +310,26 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   setConfig(config) {
+    // Si la configuration change (ajout/suppression), on force la reconstruction
     this._config = config;
+    if (this.content) {
+      this._buildCards();
+    }
   }
 
   getCardSize() {
     return 3;
   }
 }
-
 customElements.define('all-areas-display', AllAreasDisplay);
 
-
-// ==========================================
-// 3. ENREGISTREMENT CATALOGUE
-// ==========================================
+// Enregistrement de la carte
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
-    name: "All areas display",
+    name: "All Areas Display (Grille & Multi)",
     preview: true,
-    description: "Multi-générateur de cartes par pièces avec sélecteur graphique natif."
+    description: "Générateur automatique par pièce. Supporte la grille paramétrable et l'empilement multi-cartes."
   });
 }
