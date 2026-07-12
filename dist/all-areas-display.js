@@ -21,8 +21,6 @@ class AllAreasDisplayEditor extends HTMLElement {
 
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
-        
-        <!-- 1. Choix de la Disposition globale -->
         <div>
           <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1em;">1. Disposition globale</h3>
           <ha-form id="layout-form"></ha-form>
@@ -30,14 +28,9 @@ class AllAreasDisplayEditor extends HTMLElement {
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
-        <!-- 2. Éditeur de carte avec bouton de bascule d'interface -->
         <div>
           <h3 style="margin: 0 0 10px 0; color: var(--primary-color); font-size: 1.1em;">2. Configuration de la carte modèle</h3>
-          
-          <div id="editor-container" style="min-height: 150px; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; background: var(--card-background-color);">
-            <!-- L'éditeur officiel (Visuel ou Code YAML) s'injecte ici -->
-          </div>
-          
+          <div id="editor-container" style="min-height: 150px; border: 1px solid var(--divider-color); border-radius: 8px; padding: 10px; background: var(--card-background-color);"></div>
           <button id="toggle-editor-mode" style="
             margin-top: 12px;
             width: 100%;
@@ -52,7 +45,6 @@ class AllAreasDisplayEditor extends HTMLElement {
             🔄 Basculer entre Éditeur Visuel / Code (YAML)
           </button>
         </div>
-
       </div>
     `;
 
@@ -61,7 +53,7 @@ class AllAreasDisplayEditor extends HTMLElement {
     await this._attachCardEditor();
 
     this.querySelector("#toggle-editor-mode").addEventListener("click", () => {
-      if (this._cardEditor) {
+      if (this._cardEditor && typeof this._cardEditor.toggleMode === 'function') {
         this._cardEditor.toggleMode();
       }
     });
@@ -116,9 +108,20 @@ class AllAreasDisplayEditor extends HTMLElement {
     const container = this.querySelector("#editor-container");
     if (!container) return;
 
-    const cardEditor = document.createElement("hui-card-element-editor");
-    cardEditor.hass = this._hass;
+    // Utilisation sécurisée du créateur d'éditeur de HA
+    let cardEditor;
+    if (window.loadCardHelpers) {
+      const helpers = await window.loadCardHelpers();
+      if (helpers && typeof helpers.createCardEditorElement === 'function') {
+        cardEditor = helpers.createCardEditorElement(this._config?.template_card || { type: "button" });
+      }
+    }
     
+    if (!cardEditor) {
+      cardEditor = document.createElement("hui-card-element-editor");
+    }
+
+    cardEditor.hass = this._hass;
     cardEditor.value = this._config?.template_card || { 
       type: "button", 
       name: "[[area_name]]", 
@@ -157,7 +160,7 @@ customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES (ULTRA-SÉCURISÉ)
+// 2. LE GENERATEUR D'AFFICHAGE MULTI-ZONES (RÉSOLU)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -180,9 +183,15 @@ class AllAreasDisplay extends HTMLElement {
 
   constructor() {
     super();
-    this.innerHTML = `<div id="root" style="width: 100%; min-height: 50px;"></div>`;
+    this.innerHTML = `<div id="root" style="width:100%;"></div>`;
     this.content = this.querySelector('#root');
     this._childElements = [];
+  }
+
+  // Obligatoire pour éviter que HA râle si le layout parent appelle setConfig sur l'instance globale
+  setConfig(config) {
+    this._config = config;
+    if (this.content) this._buildCards();
   }
 
   set hass(hass) {
@@ -191,7 +200,7 @@ class AllAreasDisplay extends HTMLElement {
 
     if (this._childElements.length > 0) {
       this._childElements.forEach(el => {
-        if (el) el.hass = hass;
+        if (el && 'hass' in el) el.hass = hass;
       });
     } else {
       this._buildCards();
@@ -211,22 +220,19 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
-    // TEST DE SÉCURITÉ VISUELLE : On force un texte temporaire pour voir si le DOM répond
-    if (this.content.innerHTML === '') {
-      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Chargement des pièces...</div>`;
-    }
-
-    // Récupération sécurisée des helpers de Home Assistant
     let helpers;
-    if (window.loadCardHelpers) {
-      helpers = await window.loadCardHelpers();
-    } else if (window.frontendVersion) {
-      // Alternative si loadCardHelpers met du temps à se lier globalement
-      helpers = await document.createElement("hui-root").constructor.prototype.loadCardHelpers();
+    try {
+      if (window.loadCardHelpers) {
+        helpers = await window.loadCardHelpers();
+      } else {
+        helpers = await document.createElement("hui-root").constructor.prototype.loadCardHelpers();
+      }
+    } catch (e) {
+      console.error("Impossible de récupérer les cardHelpers", e);
     }
 
     if (!helpers) {
-      this.content.innerHTML = `<div style="padding:10px; color:red;">Erreur : Impossible de charger les outils internes de Home Assistant.</div>`;
+      this.content.innerHTML = `<div style="padding:10px; color:red;">Erreur système : Outils HA indisponibles.</div>`;
       return;
     }
 
@@ -237,6 +243,7 @@ class AllAreasDisplay extends HTMLElement {
     const layoutType = config.layout_type || 'grid';
     const gridWrapper = document.createElement('div');
 
+    // Mise en page native CSS pure pour contourner complètement le bug setConfig des stacks HA
     if (layoutType === 'grid') {
       const cols = config.layout_options?.columns || 2;
       gridWrapper.style.display = 'grid';
@@ -263,7 +270,6 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (matchCard) defaultEntity = matchCard.entity_id;
 
-      // Si aucune entité n'est trouvée, on met une entité générique ou existante pour ne pas bloquer l'affichage
       if (!defaultEntity) {
         const anyEntity = Object.values(hass.states).find(s => hass.entities[s.entity_id]?.area_id === areaId);
         defaultEntity = anyEntity ? anyEntity.entity_id : 'sun.sun'; 
@@ -301,23 +307,24 @@ class AllAreasDisplay extends HTMLElement {
       try {
         const cardElement = helpers.createCardElement(cardConfig);
         cardElement.hass = hass;
+        
+        // Sécurité critique : on s'assure que la sous-carte possède sa méthode setConfig si HA l'appelle à la volée
+        if (typeof cardElement.setConfig !== 'function') {
+          cardElement.setConfig = function(c) { this._config = c; };
+        }
+
         gridWrapper.appendChild(cardElement);
         this._childElements.push(cardElement);
       } catch (e) {
-        console.error("Erreur d'initialisation de la sous-carte :", e);
+        console.error("Erreur sous-carte:", e);
       }
     });
 
     if (this._childElements.length === 0) {
-      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Aucune pièce avec entité compatible trouvée.</div>`;
+      this.content.innerHTML = `<div style="padding:10px; color:var(--secondary-text-color);">Aucune pièce trouvée.</div>`;
     } else {
       this.content.appendChild(gridWrapper);
     }
-  }
-
-  setConfig(config) {
-    this._config = config;
-    this._buildCards();
   }
 
   getCardSize() {
@@ -325,3 +332,13 @@ class AllAreasDisplay extends HTMLElement {
   }
 }
 customElements.define('all-areas-display', AllAreasDisplay);
+
+window.customCards = window.customCards || [];
+if (!window.customCards.some(c => c.type === 'all-areas-display')) {
+  window.customCards.push({
+    type: "all-areas-display",
+    name: "All Areas Display",
+    preview: true,
+    description: "Multi-générateur de cartes épuré."
+  });
+}
