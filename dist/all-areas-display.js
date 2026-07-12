@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI COMPLET)
+// 1. L'ÉDITEUR VISUEL AVANCÉ (GUI)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   async setConfig(config) {
@@ -18,7 +18,6 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   async _render() {
-    // Si l'élément de base est déjà là, on met à jour les données mais on ne recrée pas le DOM
     if (this._layoutFormElement) {
       this._updateFormValues();
       return;
@@ -33,14 +32,13 @@ class AllAreasDisplayEditor extends HTMLElement {
         
         <h3 style="margin: 0; color: var(--primary-color);">Configuration du Modèle de Carte</h3>
         <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Configurez ici la carte unique qui sera clonée et automatisée pour chaque pièce.
+          Configurez ici la carte unique qui sera dupliquée pour chaque pièce détectée.
         </p>
         
-        <!-- Conteneur pour le sélecteur graphique officiel de Home Assistant -->
         <div id="card-editor-container"></div>
 
         <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.4; background: var(--secondary-background-color); padding: 10px; border-radius: 6px;">
-          <strong>Variables dynamiques injectables :</strong><br>
+          <strong>Variables dynamiques utilisables :</strong><br>
           <code>[[area_name]]</code>, <code>[[area_icon]]</code>, <code>[[area_id]]</code>, <code>[[area_slug]]</code>, <code>[[area_temp]]</code>, <code>[[area_humidity]]</code>, <code>[[default_entity]]</code>
         </div>
       </div>
@@ -49,7 +47,6 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._layoutFormElement = this.querySelector("#layout-form");
     const editorContainer = this.querySelector("#card-editor-container");
 
-    // Définition du schéma ha-form pour la structure globale
     const layoutSchema = [
       {
         name: "layout_type",
@@ -58,8 +55,8 @@ class AllAreasDisplayEditor extends HTMLElement {
           select: {
             options: [
               { value: "grid", label: "Grille (Grid)" },
-              { value: "horizontal-stack", label: "Pile Horizontale (Horizontal Stack)" },
-              { value: "vertical-stack", label: "Pile Verticale (Vertical Stack)" }
+              { value: "horizontal-stack", label: "Pile Horizontale (Horizontal)" },
+              { value: "vertical-stack", label: "Pile Verticale (Vertical)" }
             ]
           }
         }
@@ -80,7 +77,6 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._layoutFormElement.schema = layoutSchema;
     this._updateFormValues();
 
-    // Écouteur sur le formulaire de mise en page
     this._layoutFormElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
       const newConfig = {
@@ -94,17 +90,12 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._fireConfigChanged(newConfig);
     });
 
-    // Chargement et injection de l'éditeur de carte officiel (GUI) de Home Assistant
     try {
       const helpers = await window.loadCardHelpers();
-      // Crée l'élément d'édition interne utilisé par l'UI Lovelace de HA
       this._cardEditorElement = document.createElement("hui-card-element-editor");
       this._cardEditorElement.hass = this._hass;
-      
-      // On lui passe la carte modèle actuelle
       this._cardEditorElement.value = this._config.button_template || { type: "tile", name: "[[area_name]]" };
 
-      // Écouteur pour capturer les changements graphiques faits dans le sous-éditeur
       this._cardEditorElement.addEventListener("config-changed", (ev) => {
         ev.stopPropagation();
         const newConfig = {
@@ -116,7 +107,7 @@ class AllAreasDisplayEditor extends HTMLElement {
 
       editorContainer.appendChild(this._cardEditorElement);
     } catch (err) {
-      console.error("Impossible de charger le sélecteur de carte HA", err);
+      console.error("Erreur sélecteur HA:", err);
       editorContainer.innerHTML = `<p style="color:red;">Erreur de chargement de l'éditeur visuel.</p>`;
     }
   }
@@ -130,12 +121,11 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   _fireConfigChanged(newConfig) {
-    const event = new CustomEvent("config-changed", {
+    this.dispatchEvent(new CustomEvent("config-changed", {
       detail: { config: newConfig },
       bubbles: true,
       composed: true,
-    });
-    this.dispatchEvent(event);
+    }));
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
@@ -157,13 +147,14 @@ class AllAreasDisplay extends HTMLElement {
       button_template: {
         type: "tile",
         name: "[[area_name]]",
-        icon: "[[area_icon]]",
-        tap_action: {
-          action: "navigate",
-          navigation_path: "#[[area_slug]]"
-        }
+        icon: "[[area_icon]]"
       }
     };
+  }
+
+  setConfig(config) {
+    // Suppression complète de l'ancienne vérification stricte "card_template"
+    this._config = config;
   }
 
   set hass(hass) {
@@ -172,13 +163,11 @@ class AllAreasDisplay extends HTMLElement {
     
     if (!this._config) return;
 
-    // Premier rendu du conteneur de base
     if (!this.content) {
       this.innerHTML = `<div id="card-container"></div>`;
       this.content = this.querySelector('#card-container');
     }
 
-    // Si HASS change mais que la structure est déjà construite, on transmet juste l'état aux enfants
     if (this._layoutElement && oldHass && oldHass.areas === hass.areas && oldHass.states === hass.states) {
       this._layoutElement.hass = hass;
       return;
@@ -193,11 +182,10 @@ class AllAreasDisplay extends HTMLElement {
     const areas = Object.values(hass.areas || {});
 
     if (areas.length === 0) {
-      this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce détectée dans Home Assistant.</ha-alert>`;
+      this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce détectée.</ha-alert>`;
       return;
     }
 
-    // Détermination de la structure d'alignement demandée
     const layoutConfig = {
       type: config.layout_type || 'grid',
       cards: []
@@ -208,13 +196,16 @@ class AllAreasDisplay extends HTMLElement {
       layoutConfig.square = false;
     }
 
+    // Sécurité si aucun template n'est encore enregistré
+    let templateToUse = config.button_template || { type: "tile", name: "[[area_name]]" };
+
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name;
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
-      // 🔍 1. Trouver une entité de contrôle par défaut (Lumière ou Switch) dans la pièce
+      // Recherche d'entité par défaut
       let defaultEntity = "sun.sun"; 
       const lightEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('light.') && 
@@ -230,7 +221,7 @@ class AllAreasDisplay extends HTMLElement {
         if (switchEntity) defaultEntity = switchEntity.entity_id;
       }
 
-      // 🌡️ 2. Récupérer la température automatique de la pièce
+      // Capteurs Temp / Humidité
       let areaTemp = "N/A";
       const tempEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
@@ -239,7 +230,6 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
 
-      // 💧 3. Récupérer l'humidité automatique de la pièce
       let areaHumidity = "N/A";
       const humEntity = Object.values(hass.states).find(state => 
         state.entity_id.startsWith('sensor.') && 
@@ -248,10 +238,7 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
 
-      // 🏗️ 4. Récupération du modèle défini dans l'éditeur visuel
-      let templateToUse = config.button_template || { type: "tile", name: "[[area_name]]" };
-
-      // 📝 5. Remplacement récursif propre des variables textuelles et d'objets
+      // Remplacement propre des variables
       const replaceVariables = (obj) => {
         let str = JSON.stringify(obj);
         str = str.replaceAll('[[area_id]]', areaId);
@@ -267,7 +254,6 @@ class AllAreasDisplay extends HTMLElement {
       layoutConfig.cards.push(replaceVariables(templateToUse));
     });
 
-    // Rendu de l'élément global de mise en page via les helpers Lovelace
     try {
       const helpers = await window.loadCardHelpers();
       const element = helpers.createCardElement(layoutConfig);
@@ -277,24 +263,19 @@ class AllAreasDisplay extends HTMLElement {
       this.content.appendChild(element);
       this._layoutElement = element;
     } catch (err) {
-      console.error("Erreur lors de la création de la vue d'ensemble", err);
+      console.error("Erreur rendu:", err);
     }
-  }
-
-  setConfig(config) {
-    this._config = config;
   }
 
   getCardSize() {
     return 4;
   }
 }
-
 customElements.define('all-areas-display', AllAreasDisplay);
 
 
 // ==========================================
-// 3. ENREGISTREMENT CATALOGUE
+// 3. ENREGISTREMENT CATALOGUE (OK LOVELACE)
 // ==========================================
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
