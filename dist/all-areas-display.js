@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR DE CODE (STYLE AUTO-ENTITIES)
+// 1. L'ÉDITEUR DE CODE (YAML STRICT)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -19,7 +19,7 @@ class AllAreasDisplayEditor extends HTMLElement {
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 10px;">
         <h3 style="margin: 0; color: var(--primary-color);">Configuration All Areas Display</h3>
         <p style="margin: 0 0 10px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-          Configurez votre carte en pur YAML. Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>, etc.
+          Configurez votre carte en pur YAML. Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
         </p>
         <div id="yaml-editor-container"></div>
       </div>
@@ -50,7 +50,7 @@ customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LA CARTE PRINCIPALE (MOTEUR GENERIQUE)
+// 2. LA CARTE PRINCIPALE
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -62,8 +62,7 @@ class AllAreasDisplay extends HTMLElement {
       type: "custom:all-areas-display",
       layout: {
         type: "grid",
-        columns: 2,
-        square: false
+        columns: 2
       },
       exclude: [],
       card: {
@@ -78,19 +77,12 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   set hass(hass) {
-    const oldHass = this._hass;
     this._hass = hass;
-    
-    if (!this._config) return;
+    if (!this._config || !hass) return;
 
     if (!this.content) {
       this.innerHTML = `<div id="card-container"></div>`;
       this.content = this.querySelector('#card-container');
-    }
-
-    if (this._layoutElement && oldHass && oldHass.areas === hass.areas && oldHass.states === hass.states) {
-      this._layoutElement.hass = hass;
-      return;
     }
 
     this._buildContainer();
@@ -99,9 +91,13 @@ class AllAreasDisplay extends HTMLElement {
   async _buildContainer() {
     const config = this._config;
     const hass = this._hass;
-    let areas = Object.values(hass.areas || {});
     
-    // 1. Filtrer les exclusions (par ID ou par Nom)
+    // Protection si les areas ne sont pas encore chargées par HA
+    if (!hass.areas) return;
+    
+    let areas = Object.values(hass.areas);
+    
+    // 1. Filtrer les exclusions
     const excludeList = (config.exclude || []).map(item => item.toLowerCase());
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
@@ -114,71 +110,25 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
-    // 2. Préparer la structure de mise en page (grid, vertical-stack, etc.)
+    // 2. Préparer la structure du conteneur (ex: grid ou vertical-stack)
     const layoutConfig = {
       ...(config.layout || { type: "grid", columns: 2 }),
       cards: []
     };
 
-    // 3. Générer les cartes pour chaque pièce
+    // 3. Générer les configurations de cartes en remplaçant les strings
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name || areaId;
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
       const areaIcon = area.icon || "mdi:home-outline";
 
-      // Recherche de l'entité par défaut (Light > Switch > Sun)
-      let defaultEntity = "sun.sun"; 
-      const lightEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('light.') && hass.entities[state.entity_id]?.area_id === areaId
-      );
-      if (lightEntity) {
-        defaultEntity = lightEntity.entity_id;
-      } else {
-        const switchEntity = Object.values(hass.states).find(state => 
-          (state.entity_id.startsWith('switch.') || state.entity_id.startsWith('input_boolean.')) && 
-          hass.entities[state.entity_id]?.area_id === areaId
-        );
-        if (switchEntity) defaultEntity = switchEntity.entity_id;
-      }
-
-      // Extraction température & humidité
-      let areaTemp = "N/A";
-      const tempEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('sensor.') && 
-        (state.entity_id.includes('temperature') || state.attributes.device_class === 'temperature') && 
-        hass.entities[state.entity_id]?.area_id === areaId
-      );
-      if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
-
-      let areaHumidity = "N/A";
-      const humEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('sensor.') && 
-        (state.entity_id.includes('humidity') || state.attributes.device_class === 'humidity') && 
-        hass.entities[state.entity_id]?.area_id === areaId
-      );
-      if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
-
-      const areaData = {
-        id: areaId,
-        name: areaName,
-        slug: areaSlug,
-        icon: areaIcon,
-        entity: defaultEntity,
-        temperature: areaTemp,
-        humidity: areaHumidity
-      };
-
-      // Remplacement des variables "this.area.xxx"
       const processCard = (obj) => {
         let str = JSON.stringify(obj);
-        str = str.replaceAll('this.area.id', areaData.id);
-        str = str.replaceAll('this.area.name', areaData.name);
-        str = str.replaceAll('this.area.slug', areaData.slug);
-        str = str.replaceAll('this.area.icon', areaData.icon);
-        str = str.replaceAll('this.area.entity', areaData.entity);
-        str = str.replaceAll('this.area.temperature', areaData.temperature);
-        str = str.replaceAll('this.area.humidity', areaData.humidity);
+        str = str.replaceAll('this.area.id', areaId);
+        str = str.replaceAll('this.area.name', areaName);
+        str = str.replaceAll('this.area.slug', areaSlug);
+        str = str.replaceAll('this.area.icon', areaIcon);
         return JSON.parse(str);
       };
 
@@ -186,30 +136,28 @@ class AllAreasDisplay extends HTMLElement {
         try {
           layoutConfig.cards.push(processCard(config.card));
         } catch (e) {
-          console.error("Erreur template All Areas Display :", e);
+          console.error("Erreur de processing de la carte :", e);
         }
       }
     });
 
-    // 4. Rendu final du bloc
-    try {
-      const helpers = await window.loadCardHelpers();
-      const element = helpers.createCardElement(layoutConfig);
-      element.hass = hass;
-
+    // 4. Rendu via l'élément natif de HA (évite d'attendre loadCardHelpers)
+    if (!this._layoutElement) {
+      this._layoutElement = document.createElement("hui-element");
       this.content.innerHTML = '';
-      this.content.appendChild(element);
-      this._layoutElement = element;
-    } catch (err) {
-      console.error("Erreur de rendu du container principal :", err);
+      this.content.appendChild(this._layoutElement);
     }
+    
+    this._layoutElement.setConfig(layoutConfig);
+    this._layoutElement.hass = hass;
   }
 
   getCardSize() { return 4; }
 }
+
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement catalogue Lovelace
+// Enregistrement catalogue
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
