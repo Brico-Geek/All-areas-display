@@ -15,74 +15,41 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
-  // --- RENDU YAML SÉCURISÉ ET CORRIGÉ ---
+  // --- PETIT MOTEUR DE RENDU YAML LOCAL TRÈS ROBUSTE ---
+  // Il remplace jsyaml pour le dump et gère parfaitement l'indentation, les objets et les listes (-)
   _stringifyYaml(obj, depth = 0) {
     const indent = "  ".repeat(depth);
     
-    if (obj === null || obj === undefined) return " ~";
+    if (obj === null || obj === undefined) return "";
     
-    // TABLEAUX (Listes)
     if (Array.isArray(obj)) {
       if (obj.length === 0) return " []";
       return "\n" + obj.map(item => {
         if (typeof item === 'object' && item !== null) {
+          // Pour un objet dans une liste, on indente le premier champ derrière le tiret
           const entries = Object.entries(item);
           if (entries.length === 0) return `${indent}- {}`;
-          
-          // Premier champ de l'objet accroché au tiret "-"
-          const [firstKey, firstVal] = entries[0];
-          let firstLine = `${indent}- ${firstKey}:`;
-          
-          if (typeof firstVal === 'object' && firstVal !== null) {
-            firstLine += this._stringifyYaml(firstVal, depth + 1);
-          } else {
-            const strVal = String(firstVal);
-            const formattedVal = (strVal.includes('#') || strVal.includes(':') || strVal === '') ? `"${strVal.replace(/"/g, '\\"')}"` : strVal;
-            firstLine += ` ${formattedVal}`;
-          }
-          
-          // Les champs suivants du même objet (indentés de 2 espaces de plus)
-          const restLines = entries.slice(1).map(([k, v]) => {
-            let line = `${indent}  ${k}:`;
-            if (typeof v === 'object' && v !== null) {
-              return line + this._stringifyYaml(v, depth + 1);
-            } else {
-              const strV = String(v);
-              const formattedV = (strV.includes('#') || strV.includes(':') || strV === '') ? `"${strV.replace(/"/g, '\\"')}"` : strV;
-              return line + ` ${formattedV}`;
-            }
-          }).join("\n");
-          
-          return restLines ? `${firstLine}\n${restLines}` : firstLine;
+          const first = `${indent}- ${entries[0][0]}:${this._stringifyYaml(entries[0][1], depth + 1)}`;
+          const rest = entries.slice(1).map(([k, v]) => `${indent}  ${k}:${this._stringifyYaml(v, depth + 1)}`).join("\n");
+          return rest ? `${first}\n${rest}` : first;
         }
-        
-        // Valeur simple dans un tableau (ex: alert_classes)
-        return `${indent}- ${obj === '' ? '""' : item}`;
+        return `${indent}- ${item}`;
       }).join("\n");
     }
     
-    // OBJETS
     if (typeof obj === 'object') {
       const entries = Object.entries(obj);
       if (entries.length === 0) return " {}";
-      
       const content = entries.map(([k, v]) => {
-        let line = `${indent}${k}:`;
-        if (typeof v === 'object' && v !== null) {
-          // L'objet enfant va gérer son propre retour à la ligne
-          return line + this._stringifyYaml(v, depth + 1);
-        } else {
-          // Valeur simple : on force l'espace et on reste sur la même ligne
-          const strV = String(v);
-          const formattedV = (strV.includes('#') || strV.includes(':') || strV === '') ? `"${strV.replace(/"/g, '\\"')}"` : strV;
-          return line + ` ${formattedV}`;
-        }
+        const valueStr = this._stringifyYaml(v, depth + 1);
+        // Si la valeur commence par un retour à la ligne (objet/tableau imbriqué), pas besoin d'espace après le ":"
+        const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
+        return `${indent}${k}:${separator}${valueStr}`;
       }).join("\n");
-      
       return depth === 0 ? content : "\n" + content;
     }
     
-    // VALEURS SIMPLES (Cas de secours)
+    // Protection pour les chaînes de caractères complexes ou vides
     const str = String(obj);
     if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
       return `"${str.replace(/"/g, '\\"')}"`;
@@ -187,9 +154,15 @@ class AllAreasDisplayEditor extends HTMLElement {
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    
-    // On utilise notre méthode interne récursive : zéro dépendance, zéro corruption
-    this._cardYamlEditor.value = this._stringifyYaml(currentCardConfig).trim();
+
+    // On utilise la fonction native JSON.stringify avec un décalage de 2 espaces.
+    // L'éditeur 'ha-code-editor' de Home Assistant est capable de parser cela nativement
+    // s'il est en mode YAML.
+    try {
+      this._cardYamlEditor.value = JSON.stringify(currentCardConfig, null, 2);
+    } catch (e) {
+      console.error("Erreur lors de la conversion YAML", e);
+    }
   }
 
   _handleYamlChange(rawText) {
