@@ -1,12 +1,60 @@
 // ==========================================
-// LA CARTE PRINCIPALE (ALL AREAS DISPLAY)
+// 1. L'ÉDITEUR DE CODE (YAML STRICT)
+// ==========================================
+class AllAreasDisplayEditor extends HTMLElement {
+  setConfig(config) {
+    this._config = config;
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    if (this._yamlEditor) this._yamlEditor.hass = hass;
+  }
+
+  _render() {
+    if (this._yamlEditor) return;
+
+    this.innerHTML = `
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 10px;">
+        <h3 style="margin: 0; color: var(--primary-color);">Configuration All Areas Display</h3>
+        <p style="margin: 0 0 10px 0; font-size: 0.85em; color: var(--secondary-text-color);">
+          Configurez votre carte en pur YAML. Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
+        </p>
+        <div id="yaml-editor-container"></div>
+      </div>
+    `;
+
+    const container = this.querySelector("#yaml-editor-container");
+
+    this._yamlEditor = document.createElement("ha-code-editor");
+    this._yamlEditor.mode = "yaml";
+    this._yamlEditor.value = window.jsyaml ? window.jsyaml.dump(this._config) : JSON.stringify(this._config, null, 2);
+
+    this._yamlEditor.addEventListener("value-changed", (ev) => {
+      ev.stopPropagation();
+      try {
+        const parsedConfig = window.jsyaml ? window.jsyaml.load(ev.detail.value) : JSON.parse(ev.detail.value);
+        this.dispatchEvent(new CustomEvent("config-changed", {
+          detail: { config: parsedConfig },
+          bubbles: true,
+          composed: true,
+        }));
+      } catch (err) {}
+    });
+
+    container.appendChild(this._yamlEditor);
+  }
+}
+customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
+
+
+// ==========================================
+// 2. LA CARTE PRINCIPALE
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
-
-  // On injecte directement la propriété native de Home Assistant 
-  // pour bloquer l'éditeur visuel et forcer le mode code YAML.
-  static get FORBID_VISUAL() {
-    return true;
+  static getConfigElement() {
+    return document.createElement("all-areas-display-editor");
   }
 
   static getStubConfig() {
@@ -25,29 +73,16 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config || !config.card) {
-      throw new Error("Vous devez spécifier un modèle de carte dans 'card:'");
-    }
     this._config = config;
   }
 
   set hass(hass) {
-    const oldHass = this._hass;
     this._hass = hass;
-
     if (!this._config || !hass) return;
 
-    // Création du conteneur HTML principal s'il n'existe pas
     if (!this.content) {
       this.innerHTML = `<div id="card-container"></div>`;
       this.content = this.querySelector('#card-container');
-    }
-
-    // Sécurité : Si les entités ou les pièces n'ont pas changé, on met juste à jour l'état 
-    // des cartes enfants sans recréer tout le DOM (évite les clignotements et les crashs)
-    if (this._layoutElement && oldHass && oldHass.areas === hass.areas && oldHass.states === hass.states) {
-      this._layoutElement.hass = hass;
-      return;
     }
 
     this._buildContainer();
@@ -56,13 +91,14 @@ class AllAreasDisplay extends HTMLElement {
   async _buildContainer() {
     const config = this._config;
     const hass = this._hass;
-
+    
+    // Protection si les areas ne sont pas encore chargées par HA
     if (!hass.areas) return;
-
+    
     let areas = Object.values(hass.areas);
-
-    // 1. Filtrage des pièces à exclure
-    const excludeList = (config.exclude || []).map(item => String(item).toLowerCase());
+    
+    // 1. Filtrer les exclusions
+    const excludeList = (config.exclude || []).map(item => item.toLowerCase());
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
       const nameMatch = area.name ? excludeList.includes(area.name.toLowerCase()) : false;
@@ -74,13 +110,13 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
-    // 2. Préparation du layout de base (Grid, Vertical Stack, etc.)
+    // 2. Préparer la structure du conteneur (ex: grid ou vertical-stack)
     const layoutConfig = {
       ...(config.layout || { type: "grid", columns: 2 }),
       cards: []
     };
 
-    // 3. Duplication et injection des variables dans le bloc de la carte cible
+    // 3. Générer les configurations de cartes en remplaçant les strings
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name || areaId;
@@ -96,33 +132,24 @@ class AllAreasDisplay extends HTMLElement {
         return JSON.parse(str);
       };
 
-      try {
-        layoutConfig.cards.push(processCard(config.card));
-      } catch (e) {
-        console.error("Erreur d'injection All Areas Display :", e);
+      if (config.card) {
+        try {
+          layoutConfig.cards.push(processCard(config.card));
+        } catch (e) {
+          console.error("Erreur de processing de la carte :", e);
+        }
       }
     });
 
-    // 4. Rendu sécurisé via les Card Helpers natifs de Home Assistant
-    try {
-      const helpers = window.cardHelpers || (window.loadCardHelpers ? await window.loadCardHelpers() : null);
-      
-      if (helpers) {
-        const element = helpers.createCardElement(layoutConfig);
-        element.hass = hass;
-        
-        this.content.innerHTML = '';
-        this.content.appendChild(element);
-        this._layoutElement = element;
-      } else {
-        // Si Lovelace n'est pas encore totalement prêt, on attend un instant
-        this.content.innerHTML = `<ha-alert alert-type="info">Chargement des cartes...</ha-alert>`;
-        setTimeout(() => this._buildContainer(), 250);
-      }
-    } catch (err) {
-      console.error("Erreur de rendu critique :", err);
-      this.content.innerHTML = `<ha-alert alert-type="error">Erreur : ${err.message}</ha-alert>`;
+    // 4. Rendu via l'élément natif de HA (évite d'attendre loadCardHelpers)
+    if (!this._layoutElement) {
+      this._layoutElement = document.createElement("hui-element");
+      this.content.innerHTML = '';
+      this.content.appendChild(this._layoutElement);
     }
+    
+    this._layoutElement.setConfig(layoutConfig);
+    this._layoutElement.hass = hass;
   }
 
   getCardSize() { return 4; }
@@ -130,13 +157,13 @@ class AllAreasDisplay extends HTMLElement {
 
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement dans le catalogue officiel des cartes
+// Enregistrement catalogue
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
     name: "All areas display",
     preview: true,
-    description: "Génère automatiquement des cartes pour chaque pièce en pur YAML."
+    description: "Multiplie une carte pour chaque pièce Lovelace détectée (Style auto-entities)."
   });
 }
