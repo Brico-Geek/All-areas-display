@@ -1,10 +1,10 @@
 // ==========================================
-// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS
+// 1. L'ÉDITEUR DE CODE
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   constructor() {
     super();
-    this._isInternalUpdate = false; // Verrou pour stopper la boucle
+    this._isInternalUpdate = false;
   }
 
   setConfig(config) {
@@ -14,74 +14,52 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._cardYamlEditor && !this._cardYamlEditor.hass) {
-      this._cardYamlEditor.hass = hass;
-    }
-    this._updateExcludedCheckboxes();
+    if (this._cardYamlEditor && !this._cardYamlEditor.hass) this._cardYamlEditor.hass = hass;
   }
 
-  // Force la mise à jour sans déclencher la boucle de l'éditeur
+  // --- MOTEUR DE SYNCHRONISATION ---
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
-    this._isInternalUpdate = true; // Verrouillage
-    
+    this._isInternalUpdate = true;
     const yaml = window.jsyaml;
     if (yaml && yaml.dump) {
-      const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-      this._cardYamlEditor.value = yaml.dump(currentCardConfig);
+      this._cardYamlEditor.value = yaml.dump(this._config.card || { type: "area", area: "this.area.id" });
     }
-    
-    setTimeout(() => { this._isInternalUpdate = false; }, 100); // Déverrouillage après 100ms
+    setTimeout(() => { this._isInternalUpdate = false; }, 100);
   }
 
   _handleYamlChange(rawText) {
-    if (this._isInternalUpdate) return; // Si c'est le système qui écrit, on ignore
-
+    if (this._isInternalUpdate) return;
     const yaml = window.jsyaml;
-    if (!yaml || typeof yaml.load !== "function") return;
-
     try {
       const parsedCard = yaml.load(rawText);
       if (parsedCard && typeof parsedCard === 'object') {
-        this._updateConfig({ card: parsedCard });
+        this._config = { ...this._config, card: parsedCard };
+        this._fireConfigChanged();
       }
-    } catch (err) { /* Ignorer les erreurs de frappe */ }
+    } catch (err) {}
   }
 
+  // --- RENDU UI ---
   async _render() {
-    if (this._initialized) {
-      this._updateUiFields();
-      return;
-    }
+    if (this._initialized) return;
     this._initialized = true;
 
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px;">
         <div style="display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--divider-color); padding-bottom: 14px;">
-          <label style="font-weight: bold; color: var(--primary-text-color);">Disposition des pièces :</label>
-          <select id="layout-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
+          <label style="font-weight: bold;">Configuration de mise en page</label>
+          <select id="layout-select">
             <option value="auto">Auto</option>
             <option value="grid">Grille</option>
-            <option value="vertical">Vertical Stack</option>
-            <option value="horizontal">Horizontal Stack</option>
           </select>
-          <div id="auto-options" style="display: none; align-items: center; gap: 8px;"><label style="font-size: 0.9em;">Largeur :</label><input id="auto-width" type="text" style="width: 70px; padding: 6px; border: 1px solid var(--divider-color);"/></div>
-          <div id="grid-options" style="display: none; align-items: center; gap: 6px;"><label style="font-size: 0.9em;">Colonnes :</label><input id="grid-columns" type="number" min="2" style="width: 50px; padding: 6px; border: 1px solid var(--divider-color);"/></div>
-          <div id="square-option-container" style="display: flex; align-items: center; gap: 8px;"><input id="layout-square" type="checkbox"/><label for="layout-square" style="font-size: 0.9em; cursor: pointer;">Afficher en carré</label></div>
+          <input id="grid-columns" type="number" placeholder="Colonnes (ex: 2)" />
         </div>
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <label style="font-weight: bold; color: var(--primary-text-color);">Modèle de la carte (YAML) :</label>
-          <div id="card-yaml-editor-container"></div>
-        </div>
-        <div id="excluded-areas-container"></div>
+        <div id="card-yaml-editor-container"></div>
       </div>
     `;
 
-    this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutUiChange());
-    this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutUiChange());
-    this.querySelector("#auto-width").addEventListener("change", () => this._handleLayoutUiChange());
-    this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutUiChange());
-
+    // Initialisation éditeur
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
     this._cardYamlEditor = document.createElement("ha-code-editor");
     this._cardYamlEditor.mode = "yaml";
@@ -92,14 +70,18 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._handleYamlChange(e.detail.value);
     });
 
-    this._forceYamlDumpInEditor();
-    this._updateUiFields();
-  }
+    // Liaison UI simple
+    this.querySelector("#layout-select").addEventListener("change", (e) => {
+      this._config = { ...this._config, layout: { ...this._config.layout, type: e.target.value } };
+      this._fireConfigChanged();
+    });
 
-  _updateConfig(newProps) { 
-    this._config = { ...this._config, ...newProps }; 
-    // On met à jour l'UI sans forcer le YAML si c'est déjà une modif venant de l'éditeur
-    this._fireConfigChanged(); 
+    this.querySelector("#grid-columns").addEventListener("input", (e) => {
+      this._config = { ...this._config, layout: { ...this._config.layout, columns: parseInt(e.target.value) } };
+      this._fireConfigChanged();
+    });
+
+    this._forceYamlDumpInEditor();
   }
 
   _fireConfigChanged() {
@@ -109,15 +91,6 @@ class AllAreasDisplayEditor extends HTMLElement {
       composed: true,
     }));
   }
-
-  // --- MANTENIR VOS MÉTHODES EXISTANTES ---
-  _updateUiFields() { /* Votre logique existante */ }
-  _handleLayoutUiChange() { 
-      // Après modif UI, on force la mise à jour du YAML
-      this._forceYamlDumpInEditor();
-      this._fireConfigChanged();
-  }
-  _updateExcludedCheckboxes() { /* Votre logique existante */ }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
