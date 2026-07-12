@@ -1,5 +1,5 @@
 // ==========================================
-// 1. L'ÉDITEUR VISUEL ET PARAMÉTRAGE (GUI)
+// 1. L'ÉDITEUR VISUEL AVANCÉ (100% SANS YAML)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
@@ -12,10 +12,12 @@ class AllAreasDisplayEditor extends HTMLElement {
     if (this._formElement) {
       this._formElement.hass = hass;
     }
+    // Propager Hass aux sous-éditeurs visuels des cartes
+    const subEditors = this.querySelectorAll("hui-card-element-editor");
+    subEditors.forEach(editor => { editor.hass = hass; });
   }
 
   _render() {
-    // Éviter de recréer l'interface inutilement à chaque cycle
     if (this.querySelector("#layout-form")) {
       this._updateFormSchema();
       return;
@@ -24,38 +26,36 @@ class AllAreasDisplayEditor extends HTMLElement {
     this.innerHTML = `
       <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 20px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
         
+        <!-- 1. MISE EN PAGE -->
         <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">1. Disposition Globale</h3>
+          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">Configuration de la Mise en Page</h3>
           <ha-form id="layout-form"></ha-form>
         </div>
         
         <hr style="border: none; border-top: 1px solid var(--divider-color); margin: 0;">
         
+        <!-- 2. GESTION DES COMPOSANTS PAR PIÈCE -->
         <div>
-          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">2. Éléments par pièce</h3>
+          <h3 style="margin: 0 0 5px 0; color: var(--primary-color); font-size: 1.1em;">Composants à répéter par pièce</h3>
           <p style="margin: 0 0 15px 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Ajoute les composants qui seront répétés dans chaque pièce (ex: Bouton + Popup au même endroit).
+            Ajoute tes cartes. Chacune aura son éditeur visuel dédié en dessous (comme dans Bubble Card).
           </p>
           
-          <!-- Liste des cartes configurées -->
-          <div id="cards-list" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 15px;"></div>
+          <!-- Conteneur des éditeurs visuels de cartes -->
+          <div id="sub-editors-container" style="display: flex; flex-direction: column; gap: 20px; margin-bottom: 20px;"></div>
 
-          <!-- Sélecteur d'ajout rapide -->
+          <!-- Menu d'ajout rapide -->
           <div style="display: flex; gap: 10px; align-items: center; background: var(--secondary-background-color); padding: 12px; border-radius: 8px; border: 1px dashed var(--divider-color);">
-            <ha-select id="card-type-selector" label="Ajouter un composant" style="flex-grow: 1;">
-              <mwc-list-item value="tile">Carte Tuile (Tile)</mwc-list-item>
-              <mwc-list-item value="button">Carte Bouton (Button)</mwc-list-item>
-              <mwc-list-item value="entities">Carte Entités (Entities)</mwc-list-item>
-              <mwc-list-item value="custom:mushroom-chips-card">Mushroom Chips (Si installé)</mwc-list-item>
-              <mwc-list-item value="custom:bubble-card">Bubble Card Pop-up (Si installé)</mwc-list-item>
-            </ha-select>
-            <ha-icon-button id="add-card-btn" icon="mdi:plus" style="color: var(--primary-color);"></ha-icon-button>
+            <select id="card-type-selector" style="flex-grow: 1; height: 40px; padding: 0 10px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); font-size: 0.95em;">
+              <option value="" disabled selected>Choisir un élément à ajouter...</option>
+              <option value="tile">Carte Tuile (Tile)</option>
+              <option value="button">Carte Bouton (Button)</option>
+              <option value="entities">Carte Liste d'Entités (Entities)</option>
+              <option value="custom:mushroom-template-card">Mushroom Template Card</option>
+              <option value="custom:bubble-card">Bubble Card (Popup/Button)</option>
+            </select>
+            <button id="add-card-btn" style="background: var(--primary-color); color: white; border: none; border-radius: 4px; width: 40px; height: 40px; font-size: 1.5em; cursor: pointer; display: flex; align-items: center; justify-content: center; font-weight: bold;">+</button>
           </div>
-        </div>
-
-        <div style="font-size: 0.85em; color: var(--secondary-text-color); line-height: 1.5; background: var(--secondary-background-color); padding: 12px; border-radius: 8px; border: 1px solid var(--divider-color);">
-          <strong>💡 Variables magiques utilisables :</strong><br>
-          <code>[[area_name]]</code>, <code>[[area_icon]]</code>, <code>[[default_entity]]</code>, <code>[[area_temp]]</code>, <code>[[area_humidity]]</code>
         </div>
       </div>
     `;
@@ -64,7 +64,7 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._selector = this.querySelector("#card-type-selector");
     this._addButton = this.querySelector("#add-card-btn");
 
-    // Événement sur le changement de la mise en page
+    // Événement : Changement du mode de mise en page globale
     this._formElement.addEventListener("value-changed", (ev) => {
       const value = ev.detail.value;
       let targetLayout = value.layout_type;
@@ -79,14 +79,14 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._fireConfigChanged(newConfig);
     });
 
-    // Événement d'ajout d'une carte
+    // Événement : Clic sur "+" pour ajouter un composant
     this._addButton.addEventListener("click", () => {
       const type = this._selector.value;
       if (!type) return;
 
       const templates = [...(this._config?.templates || [])];
       
-      // Configuration par défaut selon le type choisi
+      // Configuration initiale par défaut
       let newCardConfig = { type: type };
       if (type === "tile" || type === "button") {
         newCardConfig.entity = "[[default_entity]]";
@@ -95,7 +95,7 @@ class AllAreasDisplayEditor extends HTMLElement {
 
       templates.push(newCardConfig);
       this._fireConfigChanged({ ...this._config, templates });
-      this._selector.value = ""; // Reset
+      this._selector.value = ""; 
     });
 
     this._updateFormSchema();
@@ -109,21 +109,20 @@ class AllAreasDisplayEditor extends HTMLElement {
     const schema = [
       {
         name: "layout_type",
-        label: "Mode d'alignement des pièces",
+        label: "Type de mise en page",
         type: "select",
         options: [
-          ["grid", "Grille dynamique (Grid)"],
-          ["horizontal-stack", "Colonne horizontale (Horizontal Stack)"],
-          ["vertical-stack", "Colonne verticale (Vertical Stack)"]
+          ["grid", "Mode Grille (Grid)"],
+          ["horizontal-stack", "Mode Horizontal"],
+          ["vertical-stack", "Mode Vertical"]
         ]
       }
     ];
 
-    // LA CONDITION : On affiche "Colonnes" UNIQUEMENT si "grid" est sélectionné
     if (currentLayout === "grid") {
       schema.push({
         name: "columns",
-        label: "Nombre de colonnes (Minimum 2)",
+        label: "Nombre de colonnes",
         type: "integer",
         default: 2,
         valueMin: 2
@@ -133,44 +132,92 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._formElement.schema = schema;
     this._formElement.data = {
       layout_type: currentLayout,
-      columns: this._config?.layout_options?.columns || 2
+      columns: Math.max(2, this._config?.layout_options?.columns || 2)
     };
 
-    this._renderCardsList();
+    this._renderSubEditors();
   }
 
-  _renderCardsList() {
-    const listContainer = this.querySelector("#cards-list");
-    if (!listContainer) return;
+  // Génère dynamiquement l'éditeur visuel natif pour CHAQUE carte de la liste
+  async _renderSubEditors() {
+    const container = this.querySelector("#sub-editors-container");
+    if (!container) return;
 
     const templates = this._config?.templates || [];
     if (templates.length === 0) {
-      listContainer.innerHTML = `
+      container.innerHTML = `
         <div style="font-size: 0.9em; color: var(--secondary-text-color); font-style: italic; text-align: center; padding: 15px; border: 1px dashed var(--divider-color); border-radius: 6px;">
-          Aucun élément configuré pour le moment.
+          Aucun élément créé. Utilisez le menu d'ajout ci-dessous.
         </div>`;
       return;
     }
 
-    listContainer.innerHTML = "";
-    templates.forEach((tpl, index) => {
-      const row = document.createElement("div");
-      row.style = "display: flex; justify-content: space-between; align-items: center; background: var(--card-background-color); padding: 10px; border-radius: 6px; border: 1px solid var(--divider-color);";
-      row.innerHTML = `
-        <div style="display: flex; flex-direction: column; gap: 2px;">
-          <span style="font-size: 0.9em; font-weight: 500;">Composant #${index + 1}</span>
-          <code style="font-size: 0.8em; color: var(--primary-color);">${tpl.type}</code>
-        </div>
-        <ha-icon-button class="delete-btn" icon="mdi:delete" style="color: var(--error-color);"></ha-icon-button>
-      `;
+    container.innerHTML = "";
+    
+    // Charger l'outil de création d'éditeurs de Home Assistant
+    const helpers = await window.loadCardHelpers();
 
-      row.querySelector(".delete-btn").addEventListener("click", () => {
+    templates.forEach((tpl, index) => {
+      const cardWrapper = document.createElement("div");
+      cardWrapper.style = "border: 1px solid var(--divider-color); border-radius: 8px; background: var(--card-background-color); overflow: hidden; box-shadow: var(--ha-card-box-shadow, none);";
+      
+      // Barre de titre de l'élément avec bouton supprimer
+      const header = document.createElement("div");
+      header.style = "background: var(--secondary-background-color); padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--divider-color);";
+      header.innerHTML = `
+        <span style="font-weight: bold; font-size: 0.95em; color: var(--primary-text-color);">Élément #${index + 1} (${tpl.type})</span>
+        <button style="background: var(--error-color); color: white; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-size: 0.8em; font-weight: bold;">Supprimer</button>
+      `;
+      
+      header.querySelector("button").addEventListener("click", () => {
         const newTemplates = [...templates];
         newTemplates.splice(index, 1);
         this._fireConfigChanged({ ...this._config, templates: newTemplates });
       });
+      cardWrapper.appendChild(header);
 
-      listContainer.appendChild(row);
+      // Panneau d'aide pour insérer visuellement les variables sans YAML
+      const helperBar = document.createElement("div");
+      helperBar.style = "padding: 8px 15px; background: var(--info-background-color, #e8f4fd); display: flex; flex-wrap: wrap; gap: 5px; align-items: center; border-bottom: 1px solid var(--divider-color);";
+      helperBar.innerHTML = `
+        <span style="font-size: 0.8em; color: var(--primary-text-color); font-weight: 500; margin-right: 5px;">Copier une variable :</span>
+        <button class="v-btn" data-v="[[area_name]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Nom Pièce</button>
+        <button class="v-btn" data-v="[[area_icon]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Icône</button>
+        <button class="v-btn" data-v="[[default_entity]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Lumière Auto</button>
+        <button class="v-btn" data-v="[[area_temp]]" style="font-size:0.75em; padding:2px 6px; cursor:pointer; border-radius:3px; border:1px solid var(--primary-color);">Température</button>
+      `;
+      
+      // Permet de copier rapidement dans le presse-papier pour le coller dans l'éditeur visuel juste en dessous
+      helperBar.querySelectorAll(".v-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.preventDefault();
+          navigator.clipboard.writeText(btn.getAttribute("data-v"));
+          alert(`Copié : ${btn.getAttribute("data-v")} ! Tu peux le coller (Ctrl+V) dans un champ ci-dessous.`);
+        });
+      });
+      cardWrapper.appendChild(helperBar);
+
+      // CRÉATION DE L'ÉDITEUR VISUEL NATIF DE LA CARTE (Le Graal !)
+      const editorElement = document.createElement("hui-card-element-editor");
+      editorElement.hass = this._hass;
+      editorElement.lovelace = { editMode: true };
+      // On passe la config actuelle de la sous-carte à son éditeur dédié
+      editorElement.value = tpl;
+      editorElement.style = "display: block; padding: 15px;";
+
+      // Écouter quand l'utilisateur change visuellement une option dans CE sous-éditeur
+      editorElement.addEventListener("config-changed", (ev) => {
+        ev.stopPropagation(); // Ne pas perturber l'éditeur parent
+        const updatedSubConfig = ev.detail.config;
+        
+        const newTemplates = [...templates];
+        newTemplates[index] = updatedSubConfig;
+        
+        this._fireConfigChanged({ ...this._config, templates: newTemplates });
+      });
+
+      cardWrapper.appendChild(editorElement);
+      container.appendChild(cardWrapper);
     });
   }
 
@@ -186,7 +233,7 @@ customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LE COMPOSANT D'AFFICHAGE PRINCIPAL
+// 2. LE RENDU DE LA CARTE PRINCIPALE
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -227,7 +274,6 @@ class AllAreasDisplay extends HTMLElement {
     const areas = Object.values(hass.areas || {});
     const templates = config.templates || [];
 
-    // Configuration structurelle globale
     const mainLayoutConfig = {
       type: config.layout_type || 'grid',
       cards: []
@@ -237,14 +283,12 @@ class AllAreasDisplay extends HTMLElement {
       mainLayoutConfig.columns = Math.max(2, config.layout_options?.columns || 2);
     }
 
-    // Génération itérative par zone
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name;
       const areaIcon = area.icon || "mdi:home-outline";
       const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
 
-      // Extraction automatique des entités référencées dans la pièce
       let defaultEntity = "sun.sun";
       const matchCard = Object.values(hass.states).find(s => 
         (s.entity_id.startsWith('light.') || s.entity_id.startsWith('switch.')) && 
@@ -266,13 +310,11 @@ class AllAreasDisplay extends HTMLElement {
       );
       if (hSensor) areaHumidity = hSensor.state + (hSensor.attributes.unit_of_measurement || '%');
 
-      // Le conteneur interne qui empile les multi-éléments (Bouton + Popup par exemple) au même endroit
       const localStack = {
         type: "vertical-stack",
         cards: []
       };
 
-      // Remplacement propre des chaînes de caractères de variables
       const bindVariables = (tpl) => {
         let raw = JSON.stringify(tpl);
         raw = raw.replaceAll('[[area_id]]', areaId)
@@ -289,7 +331,6 @@ class AllAreasDisplay extends HTMLElement {
         localStack.cards.push(bindVariables(tpl));
       });
 
-      // Injection dans la structure racine si la pièce contient des éléments
       if (localStack.cards.length > 0) {
         if (localStack.cards.length === 1) {
           mainLayoutConfig.cards.push(localStack.cards[0]);
@@ -299,7 +340,6 @@ class AllAreasDisplay extends HTMLElement {
       }
     });
 
-    // Instanciation via le moteur de rendu natif Lovelace
     const helpers = await window.loadCardHelpers();
     const element = helpers.createCardElement(mainLayoutConfig);
     element.hass = hass;
@@ -310,7 +350,6 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   setConfig(config) {
-    // Si la configuration change (ajout/suppression), on force la reconstruction
     this._config = config;
     if (this.content) {
       this._buildCards();
@@ -323,13 +362,13 @@ class AllAreasDisplay extends HTMLElement {
 }
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement de la carte
+// Enregistrement catalogue
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
-    name: "All Areas Display (Grille & Multi)",
+    name: "All Areas Display",
     preview: true,
-    description: "Générateur automatique par pièce. Supporte la grille paramétrable et l'empilement multi-cartes."
+    description: "Générateur automatique par pièce avec support multi-cartes empilées."
   });
 }
