@@ -101,13 +101,13 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._cardYamlEditor.autofocus = false;
     yamlContainer.appendChild(this._cardYamlEditor);
 
-    // Écoute en temps réel et synchronisation immédiate avec l'éditeur global
+    // Écoute des modifications en temps réel dans notre sous-éditeur
     this._cardYamlEditor.addEventListener("value-changed", (e) => {
-      e.stopPropagation(); // Évite les boucles d'événements infinies
+      e.stopPropagation(); // Évite les conflits d'événements
       this._handleYamlChange(e.detail.value);
     });
 
-    // Premier rendu du texte proprement formaté
+    // Attente du chargement complet pour faire le premier dump propre
     setTimeout(() => {
       this._forceYamlDumpInEditor();
     }, 200);
@@ -115,40 +115,35 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateUiFields();
   }
 
-  // Injecte proprement la configuration actuelle sous forme de vrai YAML indenté
+  // Utilise l'utilitaire natif de Home Assistant pour convertir proprement l'objet JS en vrai YAML textuel
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
     const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    
-    // On va chercher le parseur de Home Assistant ou jsyaml
-    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
 
-    if (parser && typeof parser.dump === "function") {
-      this._cardYamlEditor.value = parser.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
+    // On récupère le parseur officiel chargé par Home Assistant au lieu de notre bricolage
+    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+
+    if (hassYaml && typeof hassYaml.dump === "function") {
+      this._cardYamlEditor.value = hassYaml.dump(currentCardConfig, { indent: 2, lineWidth: -1 }).trim();
     } else {
-      // Fallback plus propre et indenté si le module met du temps à charger
-      this._cardYamlEditor.value = Object.entries(currentCardConfig)
-        .map(([k, v]) => {
-          if (typeof v === 'object') {
-            return `${k}:\n` + Object.entries(v).map(([subK, subV]) => `  ${subK}: ${subV}`).join('\n');
-          }
-          return `${k}: ${v}`;
-        }).join('\n');
+      // Si jsyaml n'est pas encore dispo globalement, on utilise JSON.stringify temporairement pour ne rien perdre
+      // La zone de texte se mettra à jour proprement dès le premier événement
+      this._cardYamlEditor.value = JSON.stringify(currentCardConfig, null, 2);
     }
   }
 
-  // Traitement et synchronisation instantanée du YAML modifié vers la configuration générale
+  // Parse le YAML tapé par l'utilisateur pour le renvoyer à l'éditeur principal HA
   _handleYamlChange(rawText) {
-    const parser = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
-    if (!parser || typeof parser.load !== "function") return;
+    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+    if (!hassYaml || typeof hassYaml.load !== "function") return;
 
     try {
-      const parsedCard = parser.load(rawText);
+      const parsedCard = hassYaml.load(rawText);
       if (parsedCard && typeof parsedCard === 'object') {
-        // Met à jour la config locale
+        // Met à jour l'objet de configuration interne sans toucher au texte brut en cours de frappe
         this._config = { ...this._config, card: parsedCard };
         
-        // Dispatche l'événement requis par Home Assistant pour mettre à jour l'éditeur principal
+        // Déclenche la synchronisation avec le fichier de configuration principal de Lovelace
         this.dispatchEvent(new CustomEvent("config-changed", {
           detail: { config: this._config },
           bubbles: true,
@@ -156,7 +151,7 @@ class AllAreasDisplayEditor extends HTMLElement {
         }));
       }
     } catch (err) {
-      // On ignore l'erreur de syntaxe pendant la frappe (ex: l'utilisateur n'a pas fini d'écrire son bloc)
+      // On ignore l'erreur pendant la saisie (ex: tiret orphelin en cours d'écriture)
     }
   }
 
