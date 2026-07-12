@@ -1,31 +1,23 @@
 // ==========================================
-// 1. L'ÉDITEUR (VERSION STRICTE CODE / YAML)
+// 1. L'ÉDITEUR (MASQUE LE VISUEL PARASITE)
 // ==========================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
     this._config = config;
   }
-
   set hass(hass) {
     this._hass = hass;
   }
-
-  // Ce bloc indique à Home Assistant de ne pas essayer de générer 
-  // d'interface visuelle (ce qui évitera l'apparition des {} parasites)
   getConfigForm() {
-    return {
-      schema: [],
-    };
+    return { schema: [] }; // Force Lovelace à basculer directement sur l'éditeur de code YAML
   }
-
-  // On laisse l'élément graphique vide pour forcer l'affichage du code YAML
   focus() {}
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
 
 // ==========================================
-// 2. LA CARTE PRINCIPALE
+// 2. LA CARTE PRINCIPALE (ALL AREAS DISPLAY)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
   static getConfigElement() {
@@ -55,12 +47,21 @@ class AllAreasDisplay extends HTMLElement {
   }
 
   set hass(hass) {
+    const oldHass = this._hass;
     this._hass = hass;
+
     if (!this._config || !hass) return;
 
+    // Création du point d'ancrage HTML si inexistant
     if (!this.content) {
       this.innerHTML = `<div id="card-container"></div>`;
       this.content = this.querySelector('#card-container');
+    }
+
+    // Si les données HA n'ont pas changé, on pousse juste le nouvel état aux cartes enfants sans tout reconstruire
+    if (this._layoutElement && oldHass && oldHass.areas === hass.areas && oldHass.states === hass.states) {
+      this._layoutElement.hass = hass;
+      return;
     }
 
     this._buildContainer();
@@ -69,12 +70,13 @@ class AllAreasDisplay extends HTMLElement {
   async _buildContainer() {
     const config = this._config;
     const hass = this._hass;
-    
+
+    // Protection si Home Assistant n'a pas encore chargé la liste des pièces
     if (!hass.areas) return;
-    
+
     let areas = Object.values(hass.areas);
-    
-    // 1. Filtrage des exclusions
+
+    // 1. Filtrage des pièces à exclure
     const excludeList = (config.exclude || []).map(item => String(item).toLowerCase());
     areas = areas.filter(area => {
       const idMatch = excludeList.includes(area.area_id.toLowerCase());
@@ -87,13 +89,13 @@ class AllAreasDisplay extends HTMLElement {
       return;
     }
 
-    // 2. Configuration de la structure globale (Grid par défaut)
+    // 2. Préparation du layout global (Grid ou Vertical-Stack...)
     const layoutConfig = {
       ...(config.layout || { type: "grid", columns: 2 }),
       cards: []
     };
 
-    // 3. Remplacement des tags et duplication du modèle de carte
+    // 3. Duplication du template de carte pour chaque pièce détectée
     areas.forEach(area => {
       const areaId = area.area_id;
       const areaName = area.name || areaId;
@@ -112,19 +114,31 @@ class AllAreasDisplay extends HTMLElement {
       try {
         layoutConfig.cards.push(processCard(config.card));
       } catch (e) {
-        console.error("Erreur injection variables :", e);
+        console.error("Erreur d'injection dans la carte All Areas Display :", e);
       }
     });
 
-    // 4. Rendu de la grille/pile via l'élément hui-element standard
-    if (!this._layoutElement) {
-      this._layoutElement = document.createElement("hui-element");
-      this.content.innerHTML = '';
-      this.content.appendChild(this._layoutElement);
+    // 4. Rendu dynamique sécurisé en utilisant les Helpers officiels de Lovelace
+    try {
+      // On récupère ou on attend les helpers graphiques natifs de HA
+      const helpers = window.cardHelpers || (window.loadCardHelpers ? await window.loadCardHelpers() : null);
+      
+      if (helpers) {
+        const element = helpers.createCardElement(layoutConfig);
+        element.hass = hass;
+        
+        this.content.innerHTML = '';
+        this.content.appendChild(element);
+        this._layoutElement = element;
+      } else {
+        // Fallback de secours si Lovelace n'est pas encore prêt (évite l'écran blanc permanent)
+        this.content.innerHTML = `<ha-alert alert-type="warning">Chargement de l'interface...</ha-alert>`;
+        setTimeout(() => this._buildContainer(), 500);
+      }
+    } catch (err) {
+      console.error("Erreur critique de rendu All Areas Display :", err);
+      this.content.innerHTML = `<ha-alert alert-type="error">Erreur d'affichage : ${err.message}</ha-alert>`;
     }
-    
-    this._layoutElement.setConfig(layoutConfig);
-    this._layoutElement.hass = hass;
   }
 
   getCardSize() { return 4; }
@@ -132,13 +146,13 @@ class AllAreasDisplay extends HTMLElement {
 
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement dans le catalogue
+// Enregistrement dans le catalogue Lovelace
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
     name: "All areas display",
     preview: true,
-    description: "Affiche des cartes dynamiques par pièce en pur YAML."
+    description: "Génère automatiquement des cartes pour chaque pièce (Style auto-entities)."
   });
 }
