@@ -1,6 +1,6 @@
-// ==========================================
-// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS
-// ==========================================
+// =========================================================
+// 1. L'ÉDITEUR DE CODE ET COMPOSANTS VISUELS (2 YAML EDITORS)
+// =========================================================
 class AllAreasDisplayEditor extends HTMLElement {
   setConfig(config) {
     this._config = config;
@@ -9,8 +9,11 @@ class AllAreasDisplayEditor extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
-    if (this._cardYamlEditor && !this._cardYamlEditor.hass) {
-      this._cardYamlEditor.hass = hass;
+    if (this._buttonYamlEditor && !this._buttonYamlEditor.hass) {
+      this._buttonYamlEditor.hass = hass;
+    }
+    if (this._roomYamlEditor && !this._roomYamlEditor.hass) {
+      this._roomYamlEditor.hass = hass;
     }
     this._updateExcludedCheckboxes();
   }
@@ -71,8 +74,9 @@ class AllAreasDisplayEditor extends HTMLElement {
               <option value="right">Pièce à Droite (Grille à gauche)</option>
               <option value="left">Pièce à Gauche (Grille à droite)</option>
               <option value="top">Pièce en Haut (Grille en bas)</option>
+              <option value="replace">Remplacer la Grille (Avec bouton retour)</option>
             </select>
-            <span style="font-size: 0.8em; color: var(--secondary-text-color);">Sur mobile, la grille est automatiquement masquée lorsqu'une pièce est ouverte.</span>
+            <span style="font-size: 0.8em; color: var(--secondary-text-color);">Le mode "Remplacer" masque totalement la grille et les onglets lorsqu'une pièce est ouverte.</span>
           </div>
 
           <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
@@ -103,13 +107,21 @@ class AllAreasDisplayEditor extends HTMLElement {
           <div id="excluded-areas-container" style="max-height: 140px; overflow-y: auto; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary-background-color);"></div>
         </div>
 
-        <!-- SECTION 3 : ZONE YAML -->
-        <div style="display: flex; flex-direction: column; gap: 8px;">
-          <label style="font-weight: bold; color: var(--primary-text-color);">Configuration des Cartes (YAML) :</label>
+        <!-- SECTION 3 : DEUX BLOCS YAML DISTINCTS -->
+        <div style="display: flex; flex-direction: column; gap: 14px;">
           <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Variables dispo : <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.entity</code>, <code>this.floor.name</code>.
+            Variables dispos : <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.entity</code>, <code>this.area.icon</code>, <code>this.floor.name</code>.
           </p>
-          <div id="card-yaml-editor-container"></div>
+          
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <label style="font-weight: bold; color: var(--primary-text-color);">1. Configuration des Boutons (Grille) :</label>
+            <div id="button-yaml-editor-container"></div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 10px;">
+            <label style="font-weight: bold; color: var(--primary-text-color);">2. Configuration de la Pièce (Areas / Room) :</label>
+            <div id="room-yaml-editor-container"></div>
+          </div>
         </div>
 
       </div>
@@ -120,15 +132,26 @@ class AllAreasDisplayEditor extends HTMLElement {
     this.querySelector("#auto-entity").addEventListener("change", (e) => this._updateConfig({ auto_entity: e.target.value.trim() }));
     this.querySelector("#sort-select").addEventListener("change", (e) => this._updateConfig({ sort_by: e.target.value }));
 
-    const yamlContainer = this.querySelector("#card-yaml-editor-container");
-    this._cardYamlEditor = document.createElement("ha-code-editor");
-    this._cardYamlEditor.mode = "yaml";
-    this._cardYamlEditor.autofocus = false;
-    yamlContainer.appendChild(this._cardYamlEditor);
-
-    this._cardYamlEditor.addEventListener("value-changed", (e) => {
+    // Init Éditeur Bouton
+    const btnContainer = this.querySelector("#button-yaml-editor-container");
+    this._buttonYamlEditor = document.createElement("ha-code-editor");
+    this._buttonYamlEditor.mode = "yaml";
+    this._buttonYamlEditor.autofocus = false;
+    btnContainer.appendChild(this._buttonYamlEditor);
+    this._buttonYamlEditor.addEventListener("value-changed", (e) => {
       e.stopPropagation();
-      this._handleYamlChange(e.detail.value);
+      this._handleButtonYamlChange(e.detail.value);
+    });
+
+    // Init Éditeur Room
+    const roomContainer = this.querySelector("#room-yaml-editor-container");
+    this._roomYamlEditor = document.createElement("ha-code-editor");
+    this._roomYamlEditor.mode = "yaml";
+    this._roomYamlEditor.autofocus = false;
+    roomContainer.appendChild(this._roomYamlEditor);
+    this._roomYamlEditor.addEventListener("value-changed", (e) => {
+      e.stopPropagation();
+      this._handleRoomYamlChange(e.detail.value);
     });
 
     this._forceYamlDumpInEditor();
@@ -136,21 +159,35 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   _forceYamlDumpInEditor() {
-    if (!this._cardYamlEditor) return;
-    const defaultConfig = {
-      button: this._config.button || { type: "tile", entity: "this.area.entity" },
-      room: this._config.room || { cards: [{ type: "entities", entities: ["this.area.entity"] }] }
-    };
-    this._cardYamlEditor.value = this._stringifyYaml(defaultConfig).trim();
+    if (this._buttonYamlEditor) {
+      const btnConfig = this._config.button || { type: "tile", entity: "this.area.entity" };
+      this._buttonYamlEditor.value = this._stringifyYaml(btnConfig).trim();
+    }
+    if (this._roomYamlEditor) {
+      const roomConfig = this._config.room || { cards: [{ type: "entities", entities: ["this.area.entity"] }] };
+      this._roomYamlEditor.value = this._stringifyYaml(roomConfig).trim();
+    }
   }
 
-  _handleYamlChange(rawText) {
+  _handleButtonYamlChange(rawText) {
     const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
     if (!hassYaml || typeof hassYaml.load !== "function") return;
     try {
       const parsed = hassYaml.load(rawText);
       if (parsed && typeof parsed === 'object') {
-        this._config = { ...this._config, button: parsed.button, room: parsed.room };
+        this._config = { ...this._config, button: parsed };
+        this._fireConfigChanged();
+      }
+    } catch (err) {}
+  }
+
+  _handleRoomYamlChange(rawText) {
+    const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
+    if (!hassYaml || typeof hassYaml.load !== "function") return;
+    try {
+      const parsed = hassYaml.load(rawText);
+      if (parsed && typeof parsed === 'object') {
+        this._config = { ...this._config, room: parsed };
         this._fireConfigChanged();
       }
     } catch (err) {}
@@ -219,14 +256,15 @@ class AllAreasDisplayEditor extends HTMLElement {
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 
-// ==========================================
-// 2. LA CARTE PRINCIPALE (MOTEUR GENERIQUE)
-// ==========================================
+
+// =========================================================
+// 2. LA CARTE PRINCIPALE (MOTEUR GÉNÉRIQUE)
+// =========================================================
 class AllAreasDisplay extends HTMLElement {
   constructor() {
     super();
     this._selectedAreaId = null;
-    this._activeFloorId = 'all';
+    this._activeFloorId = null;
     this._lastAutoState = null;
     this._gridCards = [];
     this._roomCards = [];
@@ -255,7 +293,7 @@ class AllAreasDisplay extends HTMLElement {
     this._hass = hass;
     if (!this._config) return;
 
-    // 1. Gestion Automatique de la position
+    // 1. Navigation Automatique
     if (this._config.auto_entity) {
       const autoStateObj = hass.states[this._config.auto_entity];
       if (autoStateObj && autoStateObj.state !== this._lastAutoState) {
@@ -264,18 +302,33 @@ class AllAreasDisplay extends HTMLElement {
       }
     }
 
-    // 2. Mise à jour de HASS dans toutes les sous-cartes
+    // 2. Mise à jour de HASS dans les sous-cartes
     [...this._gridCards, ...this._roomCards].forEach(card => {
       if (card && card.hass !== hass) {
         card.hass = hass;
       }
     });
 
-    // 3. Premier rendu si vide
+    // 3. Rendu initial unique
     if (!this._initialized) {
       this._initialized = true;
+
+      // Restauration de l'état persistant si pas d'auto initialisé
+      if (!this._selectedAreaId) {
+        const persisted = localStorage.getItem('aad_selected_area');
+        if (persisted && hass.areas && hass.areas[persisted]) {
+          this._selectedAreaId = persisted;
+          const area = hass.areas[persisted];
+          if (area.floor_id) this._activeFloorId = area.floor_id;
+        }
+      }
+
       this._updateTabs();
       this._updateGrid();
+      if (this._selectedAreaId) {
+        this._renderRoom();
+      }
+      this._updateMobileVisibility();
     }
   }
 
@@ -285,6 +338,7 @@ class AllAreasDisplay extends HTMLElement {
     if (match) {
       if (match.floor_id) this._activeFloorId = match.floor_id;
       this._selectedAreaId = match.area_id;
+      localStorage.setItem('aad_selected_area', match.area_id);
       this._updateTabs();
       this._updateGrid();
       this._renderRoom();
@@ -305,41 +359,76 @@ class AllAreasDisplay extends HTMLElement {
           --aad-mobile-breakpoint: 768px;
         }
         
-        /* Layout des onglets */
+        /* Layout Onglets d'Étages (Animations Icônes -> Pilule) */
         .aad-tabs {
           display: flex;
           gap: 8px;
           overflow-x: auto;
-          scrollbar-width: none; /* Firefox */
+          scrollbar-width: none;
           padding-bottom: 4px;
         }
         .aad-tabs::-webkit-scrollbar { display: none; }
+        
         .aad-tab {
-          padding: 8px 16px;
-          border-radius: 20px;
+          padding: 8px;
+          border-radius: 50%;
           background: var(--secondary-background-color);
           color: var(--primary-text-color);
-          font-weight: 500;
           cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
           white-space: nowrap;
-          transition: background 0.2s;
+          height: 40px;
+          min-width: 40px;
+          box-sizing: border-box;
         }
-        .aad-tab:hover { background: var(--divider-color); }
+        
+        .aad-tab ha-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .aad-tab span {
+          width: 0;
+          opacity: 0;
+          overflow: hidden;
+          transition: width 0.3s, opacity 0.2s, margin-left 0.3s;
+          margin-left: 0;
+          font-weight: 500;
+        }
+
+        /* Dépliement au hover ou actif */
+        .aad-tab:hover, .aad-tab.active {
+          border-radius: 20px;
+          padding: 8px 16px;
+          min-width: unset;
+        }
+
+        .aad-tab:hover span, .aad-tab.active span {
+          width: auto;
+          opacity: 1;
+          margin-left: 8px;
+        }
+
         .aad-tab.active {
           background: var(--primary-color);
           color: var(--text-primary-color, #FFF);
         }
 
-        /* Layout Split-View Principal */
+        /* Layout Split-View */
         .aad-split-view {
           display: flex;
           gap: 16px;
           align-items: flex-start;
         }
         
-        .aad-split-view.pos-left { flex-direction: row-reverse; }
-        .aad-split-view.pos-right { flex-direction: row; }
-        .aad-split-view.pos-top { flex-direction: column-reverse; }
+        .aad-container.pos-left .aad-split-view { flex-direction: row-reverse; }
+        .aad-container.pos-right .aad-split-view { flex-direction: row; }
+        .aad-container.pos-top .aad-split-view { flex-direction: column-reverse; }
+        .aad-container.pos-replace .aad-split-view { flex-direction: column; }
         
         .aad-grid-panel {
           flex: 1;
@@ -350,7 +439,7 @@ class AllAreasDisplay extends HTMLElement {
         }
         
         .aad-room-panel {
-          flex: 1.5; /* Prend un peu plus de place que la grille */
+          flex: 1.5;
           display: flex;
           flex-direction: column;
           gap: 8px;
@@ -358,7 +447,7 @@ class AllAreasDisplay extends HTMLElement {
           min-width: 300px;
         }
 
-        /* Bouton Retour pour le mode Mobile */
+        /* Bouton Retour */
         .aad-mobile-back {
           display: none;
           padding: 12px;
@@ -371,18 +460,39 @@ class AllAreasDisplay extends HTMLElement {
           margin-bottom: 8px;
         }
 
-        /* Comportement Responsive / Mobile */
+        /* --- COMPORTEMENT RESPONSIVE ET MODE "REPLACE" --- */
+        .aad-container:not(.has-selected-room) .aad-room-panel {
+          display: none !important;
+        }
+
+        /* Mode Remplacer actif */
+        .aad-container.has-selected-room.pos-replace .aad-grid-panel,
+        .aad-container.has-selected-room.pos-replace .aad-tabs {
+          display: none !important;
+        }
+        .aad-container.has-selected-room.pos-replace .aad-room-panel {
+          min-width: 100%;
+        }
+        .aad-container.has-selected-room.pos-replace #mobile-back {
+          display: block !important;
+        }
+
+        /* Comportement Mobile global */
         @media (max-width: 768px) {
           .aad-split-view { flex-direction: column !important; }
-          .aad-room-panel { min-width: 100%; }
+          .aad-room-panel { min-width: 100% !important; }
           
-          /* Quand une pièce est ouverte sur mobile, on cache la grille */
-          .has-room .aad-grid-panel { display: none; }
-          .has-room .aad-tabs { display: none; }
-          .has-room .aad-mobile-back { display: block; }
+          /* Cache toujours la grille lors de l'ouverture sur mobile */
+          .aad-container.has-selected-room .aad-grid-panel,
+          .aad-container.has-selected-room .aad-tabs {
+            display: none !important;
+          }
+          .aad-container.has-selected-room #mobile-back {
+            display: block !important;
+          }
         }
         
-        /* Animation de clic sur les boutons de la grille */
+        /* Styles Boutons */
         .grid-button-wrapper { cursor: pointer; transition: transform 0.1s; }
         .grid-button-wrapper:active { transform: scale(0.98); }
         .grid-button-wrapper.active-room {
@@ -393,13 +503,13 @@ class AllAreasDisplay extends HTMLElement {
       shadow.appendChild(style);
 
       this.content = document.createElement('div');
-      this.content.className = 'aad-container';
+      this.content.className = `aad-container pos-${this._config.room_position}`;
       
       this.content.innerHTML = `
         <div class="aad-tabs" id="tabs-container" style="display: ${this._config.show_tabs ? 'flex' : 'none'};"></div>
-        <div class="aad-split-view pos-${this._config.room_position}" id="split-view">
+        <div class="aad-split-view" id="split-view">
           <div class="aad-grid-panel" id="grid-container"></div>
-          <div class="aad-room-panel" id="room-container" style="display: none;">
+          <div class="aad-room-panel" id="room-container">
             <div class="aad-mobile-back" id="mobile-back">
               <ha-icon icon="mdi:arrow-left"></ha-icon> Retour aux pièces
             </div>
@@ -411,24 +521,41 @@ class AllAreasDisplay extends HTMLElement {
       shadow.appendChild(this.content);
       
       shadow.getElementById('mobile-back').addEventListener('click', () => {
-        this._selectedAreaId = null;
-        this._updateGrid(); // Pour enlever la classe active
-        this._updateMobileVisibility();
+        this._selectArea(null);
       });
     }
   }
 
+  _selectArea(areaId) {
+    this._selectedAreaId = areaId;
+    if (areaId) {
+      localStorage.setItem('aad_selected_area', areaId);
+    } else {
+      localStorage.removeItem('aad_selected_area');
+    }
+
+    // Changement de classe immédiat (sans reconstruire la grille entière !)
+    const wrappers = this.content.querySelectorAll('.grid-button-wrapper');
+    wrappers.forEach(w => {
+      if (w.dataset.areaId === areaId) {
+        w.classList.add('active-room');
+      } else {
+        w.classList.remove('active-room');
+      }
+    });
+
+    this._renderRoom();
+    this._updateMobileVisibility();
+  }
+
   _updateMobileVisibility() {
-    const splitView = this.content.querySelector('#split-view');
-    const roomContainer = this.content.querySelector('#room-container');
+    const container = this.content;
+    const roomCardsEl = container.querySelector('#room-cards');
     
     if (this._selectedAreaId) {
-      splitView.classList.add('has-room');
-      roomContainer.style.display = 'flex';
+      container.classList.add('has-selected-room');
     } else {
-      splitView.classList.remove('has-room');
-      roomContainer.style.display = 'none';
-      const roomCardsEl = this.content.querySelector('#room-cards');
+      container.classList.remove('has-selected-room');
       roomCardsEl.innerHTML = '';
       this._roomCards = [];
     }
@@ -439,21 +566,23 @@ class AllAreasDisplay extends HTMLElement {
     const tabsContainer = this.content.querySelector('#tabs-container');
     tabsContainer.innerHTML = '';
 
-    // Détecter les étages depuis HA
     const floors = this._hass.floors ? Object.values(this._hass.floors) : [];
-    
-    // Tab "Toutes"
-    const allTab = document.createElement('div');
-    allTab.className = `aad-tab ${this._activeFloorId === 'all' ? 'active' : ''}`;
-    allTab.innerText = "Toutes";
-    allTab.onclick = () => { this._activeFloorId = 'all'; this._updateTabs(); this._updateGrid(); };
-    tabsContainer.appendChild(allTab);
+    floors.sort((a, b) => (a.level || 0) - (b.level || 0));
 
-    floors.sort((a, b) => (a.level || 0) - (b.level || 0)).forEach(floor => {
+    // Si aucun étage n'est actif, on sélectionne le premier par défaut (Pas de "Toutes")
+    if (floors.length > 0 && !this._activeFloorId) {
+      this._activeFloorId = floors[0].floor_id;
+    }
+
+    floors.forEach(floor => {
       const tab = document.createElement('div');
       tab.className = `aad-tab ${this._activeFloorId === floor.floor_id ? 'active' : ''}`;
-      tab.innerText = floor.name;
-      tab.onclick = () => { this._activeFloorId = floor.floor_id; this._updateTabs(); this._updateGrid(); };
+      tab.innerHTML = `<ha-icon icon="${floor.icon || 'mdi:floor-plan'}"></ha-icon><span>${floor.name}</span>`;
+      tab.onclick = () => {
+        this._activeFloorId = floor.floor_id;
+        this._updateTabs();
+        this._updateGrid();
+      };
       tabsContainer.appendChild(tab);
     });
   }
@@ -465,7 +594,7 @@ class AllAreasDisplay extends HTMLElement {
     const excludeList = (this._config.exclude || []).map(item => String(item).toLowerCase());
     areas = areas.filter(area => !excludeList.includes(area.area_id.toLowerCase()) && !(area.name && excludeList.includes(area.name.toLowerCase())));
 
-    if (this._activeFloorId !== 'all') {
+    if (this._activeFloorId) {
       areas = areas.filter(area => area.floor_id === this._activeFloorId);
     }
 
@@ -482,13 +611,10 @@ class AllAreasDisplay extends HTMLElement {
     areas.forEach(area => {
       const wrapper = document.createElement('div');
       wrapper.className = `grid-button-wrapper ${this._selectedAreaId === area.area_id ? 'active-room' : ''}`;
-      
-      // On capture le clic en phase de "capture" pour déclencher l'ouverture de la pièce
+      wrapper.dataset.areaId = area.area_id;
+
       wrapper.addEventListener('click', () => {
-        this._selectedAreaId = area.area_id;
-        this._updateGrid(); // Met à jour la surbrillance
-        this._renderRoom();
-        this._updateMobileVisibility();
+        this._selectArea(area.area_id);
       }, { capture: true });
 
       const areaData = this._extractAreaData(area);
