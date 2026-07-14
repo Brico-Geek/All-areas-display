@@ -15,18 +15,15 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._updateExcludedCheckboxes();
   }
 
-  // --- PETIT MOTEUR DE RENDU YAML LOCAL TRÈS ROBUSTE ---
-  // Il remplace jsyaml pour le dump et gère parfaitement l'indentation, les objets et les listes (-)
+  // --- MOTEUR DE RENDU YAML LOCAL ---
   _stringifyYaml(obj, depth = 0) {
     const indent = "  ".repeat(depth);
-    
     if (obj === null || obj === undefined) return "";
     
     if (Array.isArray(obj)) {
       if (obj.length === 0) return " []";
       return "\n" + obj.map(item => {
         if (typeof item === 'object' && item !== null) {
-          // Pour un objet dans une liste, on indente le premier champ derrière le tiret
           const entries = Object.entries(item);
           if (entries.length === 0) return `${indent}- {}`;
           const first = `${indent}- ${entries[0][0]}:${this._stringifyYaml(entries[0][1], depth + 1)}`;
@@ -42,14 +39,12 @@ class AllAreasDisplayEditor extends HTMLElement {
       if (entries.length === 0) return " {}";
       const content = entries.map(([k, v]) => {
         const valueStr = this._stringifyYaml(v, depth + 1);
-        // Si la valeur commence par un retour à la ligne (objet/tableau imbriqué), pas besoin d'espace après le ":"
         const separator = (valueStr.startsWith("\n") || valueStr.startsWith(" ")) ? "" : " ";
         return `${indent}${k}:${separator}${valueStr}`;
       }).join("\n");
       return depth === 0 ? content : "\n" + content;
     }
     
-    // Protection pour les chaînes de caractères complexes ou vides
     const str = String(obj);
     if (str.includes('\n') || str.includes('#') || str.includes(':') || str === '') {
       return `"${str.replace(/"/g, '\\"')}"`;
@@ -65,61 +60,54 @@ class AllAreasDisplayEditor extends HTMLElement {
     this._initialized = true;
 
     this.innerHTML = `
-      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px; font-family: var(--paper-font-body1_-_font-family, sans-serif);">
+      <div class="card-config" style="padding: 10px; display: flex; flex-direction: column; gap: 16px; font-family: sans-serif;">
         
-        <!-- SECTION 1 : DISPOSITION -->
+        <!-- SECTION 1 : DISPOSITION ET NAVIGATION -->
         <div style="display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--divider-color); padding-bottom: 14px;">
+          
           <div style="display: flex; flex-direction: column; gap: 6px;">
-            <label style="font-weight: bold; color: var(--primary-text-color);">Disposition des pièces :</label>
-            <select id="layout-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
-              <option value="auto">Auto (Fluide et extensible)</option>
-              <option value="grid">Grille (Grid)</option>
-              <option value="vertical">Vertical Stack</option>
-              <option value="horizontal">Horizontal Stack</option>
+            <label style="font-weight: bold; color: var(--primary-text-color);">Disposition de la Pièce (Split-View) :</label>
+            <select id="room-position-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
+              <option value="right">Pièce à Droite (Grille à gauche)</option>
+              <option value="left">Pièce à Gauche (Grille à droite)</option>
+              <option value="top">Pièce en Haut (Grille en bas)</option>
             </select>
+            <span style="font-size: 0.8em; color: var(--secondary-text-color);">Sur mobile, la grille est automatiquement masquée lorsqu'une pièce est ouverte.</span>
           </div>
 
-          <div id="auto-options" style="display: none; align-items: center; gap: 8px; margin-top: 6px;">
-            <label style="color: var(--primary-text-color); font-size: 0.9em;">Largeur cible des cartes :</label>
-            <input id="auto-width" type="text" placeholder="150px" style="width: 70px; padding: 6px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);" />
+          <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+            <input id="show-tabs" type="checkbox" style="cursor: pointer;" />
+            <label for="show-tabs" style="color: var(--primary-text-color); font-weight: bold; cursor: pointer;">Afficher les onglets d'Étages</label>
           </div>
 
-          <div id="grid-options" style="display: none; gap: 12px; align-items: center; margin-top: 6px;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <label style="color: var(--primary-text-color); font-size: 0.9em;">Colonnes (Min 2) :</label>
-              <input id="grid-columns" type="number" min="2" max="12" style="width: 50px; padding: 6px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color);" />
-            </div>
+          <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+            <label style="font-weight: bold; color: var(--primary-text-color);">Entité de positionnement Auto (Optionnel) :</label>
+            <input id="auto-entity" type="text" placeholder="ex: sensor.mon_telephone_location" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;" />
+            <span style="font-size: 0.8em; color: var(--secondary-text-color);">Ouvre automatiquement la pièce correspondant à l'état de cette entité.</span>
           </div>
 
-          <div id="square-option-container" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
-            <input id="layout-square" type="checkbox" style="cursor: pointer;" />
-            <label for="layout-square" style="color: var(--primary-text-color); font-size: 0.9em; cursor: pointer;">Afficher les cartes en carré</label>
-          </div>
         </div>
 
-        <!-- SECTION 2 : TRI -->
+        <!-- SECTION 2 : TRI ET FILTRES -->
         <div style="display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--divider-color); padding-bottom: 14px;">
           <label style="font-weight: bold; color: var(--primary-text-color);">Tri des pièces :</label>
           <select id="sort-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--divider-color); background: var(--card-background-color); color: var(--primary-text-color); width: 100%;">
             <option value="asc">Nom (A -> Z)</option>
             <option value="desc">Nom (Z -> A)</option>
-            <option value="none">Aucun (Ordre Home Assistant)</option>
+            <option value="none">Aucun</option>
           </select>
         </div>
 
-        <!-- SECTION 3 : PIÈCES BANNIES -->
         <div style="display: flex; flex-direction: column; gap: 6px; border-bottom: 1px solid var(--divider-color); padding-bottom: 14px;">
-          <label style="font-weight: bold; color: var(--primary-text-color);">Pièces bannies (Masquées) :</label>
-          <div id="excluded-areas-container" style="max-height: 140px; overflow-y: auto; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary-background-color);">
-            <!-- Rempli dynamiquement -->
-          </div>
+          <label style="font-weight: bold; color: var(--primary-text-color);">Pièces bannies :</label>
+          <div id="excluded-areas-container" style="max-height: 140px; overflow-y: auto; padding: 8px; border: 1px solid var(--divider-color); border-radius: 4px; display: flex; flex-direction: column; gap: 6px; background: var(--secondary-background-color);"></div>
         </div>
 
-        <!-- SECTION 4 : ZONE DU CODE YAML -->
+        <!-- SECTION 3 : ZONE YAML -->
         <div style="display: flex; flex-direction: column; gap: 8px;">
-          <label style="font-weight: bold; color: var(--primary-text-color);">Modèle de la carte (YAML) :</label>
+          <label style="font-weight: bold; color: var(--primary-text-color);">Configuration des Cartes (YAML) :</label>
           <p style="margin: 0; font-size: 0.85em; color: var(--secondary-text-color);">
-            Utilisez <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.icon</code>.
+            Variables dispo : <code>this.area.id</code>, <code>this.area.name</code>, <code>this.area.entity</code>, <code>this.floor.name</code>.
           </p>
           <div id="card-yaml-editor-container"></div>
         </div>
@@ -127,10 +115,9 @@ class AllAreasDisplayEditor extends HTMLElement {
       </div>
     `;
 
-    this.querySelector("#layout-select").addEventListener("change", () => this._handleLayoutUiChange());
-    this.querySelector("#grid-columns").addEventListener("input", () => this._handleLayoutUiChange());
-    this.querySelector("#auto-width").addEventListener("change", () => this._handleLayoutUiChange());
-    this.querySelector("#layout-square").addEventListener("change", () => this._handleLayoutUiChange());
+    this.querySelector("#room-position-select").addEventListener("change", (e) => this._updateConfig({ room_position: e.target.value }));
+    this.querySelector("#show-tabs").addEventListener("change", (e) => this._updateConfig({ show_tabs: e.target.checked }));
+    this.querySelector("#auto-entity").addEventListener("change", (e) => this._updateConfig({ auto_entity: e.target.value.trim() }));
     this.querySelector("#sort-select").addEventListener("change", (e) => this._updateConfig({ sort_by: e.target.value }));
 
     const yamlContainer = this.querySelector("#card-yaml-editor-container");
@@ -144,109 +131,42 @@ class AllAreasDisplayEditor extends HTMLElement {
       this._handleYamlChange(e.detail.value);
     });
 
-    // Rendu immédiat et propre via notre stringifier autonome
     this._forceYamlDumpInEditor();
-
     this._updateUiFields();
   }
 
-  // Injecte la configuration sous forme de vrai YAML indenté
   _forceYamlDumpInEditor() {
     if (!this._cardYamlEditor) return;
-    const currentCardConfig = this._config.card || { type: "area", area: "this.area.id" };
-    
-    // On utilise notre méthode interne récursive : zéro dépendance, zéro corruption
-    this._cardYamlEditor.value = this._stringifyYaml(currentCardConfig).trim();
+    const defaultConfig = {
+      button: this._config.button || { type: "tile", entity: "this.area.entity" },
+      room: this._config.room || { cards: [{ type: "entities", entities: ["this.area.entity"] }] }
+    };
+    this._cardYamlEditor.value = this._stringifyYaml(defaultConfig).trim();
   }
 
   _handleYamlChange(rawText) {
-    // Le parseur natif de HA fonctionne bien pour lire (load), c'est l'écriture (dump) qui posait problème.
     const hassYaml = window.jsyaml || customElements.get("ha-code-editor")?.lazyBlaze;
     if (!hassYaml || typeof hassYaml.load !== "function") return;
-
     try {
-      const parsedCard = hassYaml.load(rawText);
-      if (parsedCard && typeof parsedCard === 'object') {
-        this._config = { ...this._config, card: parsedCard };
-        
-        // Notification immédiate au dashboard Lovelace
-        this.dispatchEvent(new CustomEvent("config-changed", {
-          detail: { config: this._config },
-          bubbles: true,
-          composed: true,
-        }));
+      const parsed = hassYaml.load(rawText);
+      if (parsed && typeof parsed === 'object') {
+        this._config = { ...this._config, button: parsed.button, room: parsed.room };
+        this._fireConfigChanged();
       }
-    } catch (err) {
-      // Ignoré pendant la frappe utilisateur
-    }
+    } catch (err) {}
   }
 
   _updateUiFields() {
     if (!this._config) return;
-
-    const select = this.querySelector("#layout-select");
-    const autoOptions = this.querySelector("#auto-options");
-    const gridOptions = this.querySelector("#grid-options");
-    const squareContainer = this.querySelector("#square-option-container");
-    const colsInput = this.querySelector("#grid-columns");
-    const autoWidthInput = this.querySelector("#auto-width");
-    const squareCheckbox = this.querySelector("#layout-square");
+    const posSelect = this.querySelector("#room-position-select");
+    const tabsCheck = this.querySelector("#show-tabs");
+    const autoInput = this.querySelector("#auto-entity");
     const sortSelect = this.querySelector("#sort-select");
 
-    if (!select) return;
-
-    const layout = this._config.layout || { type: "auto" };
+    if (posSelect) posSelect.value = this._config.room_position || "left";
+    if (tabsCheck) tabsCheck.checked = this._config.show_tabs !== false;
+    if (autoInput) autoInput.value = this._config.auto_entity || "";
     if (sortSelect) sortSelect.value = this._config.sort_by || "asc";
-    
-    if (layout.type === "vertical-stack") {
-      select.value = "vertical";
-      autoOptions.style.display = "none";
-      gridOptions.style.display = "none";
-      squareContainer.style.display = "none";
-    } else if (layout.type === "horizontal-stack") {
-      select.value = "horizontal";
-      autoOptions.style.display = "none";
-      gridOptions.style.display = "none";
-      squareContainer.style.display = "none";
-    } else if (layout.type === "grid") {
-      select.value = "grid";
-      autoOptions.style.display = "none";
-      gridOptions.style.display = "flex";
-      squareContainer.style.display = "flex";
-      colsInput.value = Math.max(2, layout.columns || 2);
-      squareCheckbox.checked = layout.square || false;
-    } else {
-      select.value = "auto";
-      autoOptions.style.display = "flex";
-      gridOptions.style.display = "none";
-      squareContainer.style.display = "flex";
-      autoWidthInput.value = layout.min_width || "150px";
-      squareCheckbox.checked = layout.square || false;
-    }
-  }
-
-  _handleLayoutUiChange() {
-    const selectType = this.querySelector("#layout-select").value;
-    const isSquare = this.querySelector("#layout-square").checked;
-    let newLayout = { type: "grid" };
-
-    if (selectType === "vertical") {
-      newLayout = { type: "vertical-stack" };
-    } else if (selectType === "horizontal") {
-      newLayout = { type: "horizontal-stack" };
-    } else if (selectType === "auto") {
-      const widthVal = this.querySelector("#auto-width").value.trim() || "150px";
-      newLayout = { type: "auto", min_width: widthVal };
-    } else if (selectType === "grid") {
-      const inputCols = parseInt(this.querySelector("#grid-columns").value) || 2;
-      newLayout = { type: "grid", columns: Math.max(2, inputCols) };
-    }
-
-    if (selectType === "grid" || selectType === "auto") {
-      newLayout.square = isSquare;
-    }
-
-    this._updateConfig({ layout: newLayout });
   }
 
   _updateExcludedCheckboxes() {
@@ -294,11 +214,7 @@ class AllAreasDisplayEditor extends HTMLElement {
   }
 
   _fireConfigChanged() {
-    this.dispatchEvent(new CustomEvent("config-changed", {
-      detail: { config: this._config },
-      bubbles: true,
-      composed: true,
-    }));
+    this.dispatchEvent(new CustomEvent("config-changed", { detail: { config: this._config }, bubbles: true, composed: true }));
   }
 }
 customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
@@ -307,217 +223,361 @@ customElements.define('all-areas-display-editor', AllAreasDisplayEditor);
 // 2. LA CARTE PRINCIPALE (MOTEUR GENERIQUE)
 // ==========================================
 class AllAreasDisplay extends HTMLElement {
-  static getConfigElement() {
-    return document.createElement("all-areas-display-editor");
+  constructor() {
+    super();
+    this._selectedAreaId = null;
+    this._activeFloorId = 'all';
+    this._lastAutoState = null;
+    this._gridCards = [];
+    this._roomCards = [];
   }
+
+  static getConfigElement() { return document.createElement("all-areas-display-editor"); }
 
   static getStubConfig() {
     return {
       type: "custom:all-areas-display",
-      layout: { type: "auto", min_width: "150px" },
-      exclude: [],
-      sort_by: "asc",
-      card: { type: "area", area: "this.area.id" }
+      room_position: "left",
+      show_tabs: true,
+      button: { type: "tile", entity: "this.area.entity" },
+      room: { cards: [{ type: "entities", entities: ["this.area.entity"] }] }
     };
   }
 
   setConfig(config) {
-    const oldConfigStr = this._configStr;
-    this._configStr = JSON.stringify(config);
-    this._config = config;
-
-    if (oldConfigStr && oldConfigStr !== this._configStr) {
-      this._renderedKey = null; 
-    }
+    this._config = Object.assign({}, config);
+    if (this._config.show_tabs === undefined) this._config.show_tabs = true;
+    if (!this._config.room_position) this._config.room_position = "left";
+    this._renderBaseLayout();
   }
 
   set hass(hass) {
     this._hass = hass;
     if (!this._config) return;
 
-    if (!this.content) {
-      this.innerHTML = `<div id="card-container"></div>`;
-      this.content = this.querySelector('#card-container');
+    // 1. Gestion Automatique de la position
+    if (this._config.auto_entity) {
+      const autoStateObj = hass.states[this._config.auto_entity];
+      if (autoStateObj && autoStateObj.state !== this._lastAutoState) {
+        this._lastAutoState = autoStateObj.state;
+        this._autoSelectArea(this._lastAutoState);
+      }
     }
 
-    let areas = Object.values(hass.areas || {});
-    const excludeList = (this._config.exclude || []).map(item => String(item).toLowerCase());
-    
-    areas = areas.filter(area => {
-      const idMatch = excludeList.includes(area.area_id.toLowerCase());
-      const nameMatch = area.name ? excludeList.includes(area.name.toLowerCase()) : false;
-      return !idMatch && !nameMatch;
+    // 2. Mise à jour de HASS dans toutes les sous-cartes
+    [...this._gridCards, ...this._roomCards].forEach(card => {
+      if (card && card.hass !== hass) {
+        card.hass = hass;
+      }
     });
 
-    const sortOrder = this._config.sort_by || "asc";
-    if (sortOrder === "asc") {
-      areas.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
-    } else if (sortOrder === "desc") {
-      areas.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
+    // 3. Premier rendu si vide
+    if (!this._initialized) {
+      this._initialized = true;
+      this._updateTabs();
+      this._updateGrid();
     }
-
-    const currentRenderKey = `${this._configStr}-${areas.map(a => a.area_id).join(',')}`;
-
-    if (this._renderedKey === currentRenderKey && this._childElements) {
-      this._childElements.forEach(el => {
-        if (el && el.hass !== hass) el.hass = hass;
-      });
-      return;
-    }
-
-    this._buildContainer(areas, currentRenderKey);
   }
 
-  async _buildContainer(areas, currentRenderKey) {
-    if (this._building) return;
-    this._building = true;
+  _autoSelectArea(stateStr) {
+    const areas = Object.values(this._hass.areas || {});
+    const match = areas.find(a => a.name.toLowerCase() === stateStr.toLowerCase() || a.area_id.toLowerCase() === stateStr.toLowerCase());
+    if (match) {
+      if (match.floor_id) this._activeFloorId = match.floor_id;
+      this._selectedAreaId = match.area_id;
+      this._updateTabs();
+      this._updateGrid();
+      this._renderRoom();
+      this._updateMobileVisibility();
+    }
+  }
 
-    const config = this._config;
-    const hass = this._hass;
+  _renderBaseLayout() {
+    if (!this.content) {
+      const shadow = this.attachShadow({ mode: 'open' });
+      
+      const style = document.createElement('style');
+      style.textContent = `
+        .aad-container {
+          display: flex;
+          flex-direction: column;
+          gap: 16px;
+          --aad-mobile-breakpoint: 768px;
+        }
+        
+        /* Layout des onglets */
+        .aad-tabs {
+          display: flex;
+          gap: 8px;
+          overflow-x: auto;
+          scrollbar-width: none; /* Firefox */
+          padding-bottom: 4px;
+        }
+        .aad-tabs::-webkit-scrollbar { display: none; }
+        .aad-tab {
+          padding: 8px 16px;
+          border-radius: 20px;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+          font-weight: 500;
+          cursor: pointer;
+          white-space: nowrap;
+          transition: background 0.2s;
+        }
+        .aad-tab:hover { background: var(--divider-color); }
+        .aad-tab.active {
+          background: var(--primary-color);
+          color: var(--text-primary-color, #FFF);
+        }
 
-    if (areas.length === 0) {
-      this.content.innerHTML = `<ha-alert alert-type="info">Aucune pièce à afficher.</ha-alert>`;
-      this._renderedKey = currentRenderKey;
-      this._building = false;
-      return;
+        /* Layout Split-View Principal */
+        .aad-split-view {
+          display: flex;
+          gap: 16px;
+          align-items: flex-start;
+        }
+        
+        .aad-split-view.pos-left { flex-direction: row-reverse; }
+        .aad-split-view.pos-right { flex-direction: row; }
+        .aad-split-view.pos-top { flex-direction: column-reverse; }
+        
+        .aad-grid-panel {
+          flex: 1;
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+          gap: 8px;
+          width: 100%;
+        }
+        
+        .aad-room-panel {
+          flex: 1.5; /* Prend un peu plus de place que la grille */
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          width: 100%;
+          min-width: 300px;
+        }
+
+        /* Bouton Retour pour le mode Mobile */
+        .aad-mobile-back {
+          display: none;
+          padding: 12px;
+          border-radius: 12px;
+          background: var(--secondary-background-color);
+          color: var(--primary-text-color);
+          text-align: center;
+          font-weight: bold;
+          cursor: pointer;
+          margin-bottom: 8px;
+        }
+
+        /* Comportement Responsive / Mobile */
+        @media (max-width: 768px) {
+          .aad-split-view { flex-direction: column !important; }
+          .aad-room-panel { min-width: 100%; }
+          
+          /* Quand une pièce est ouverte sur mobile, on cache la grille */
+          .has-room .aad-grid-panel { display: none; }
+          .has-room .aad-tabs { display: none; }
+          .has-room .aad-mobile-back { display: block; }
+        }
+        
+        /* Animation de clic sur les boutons de la grille */
+        .grid-button-wrapper { cursor: pointer; transition: transform 0.1s; }
+        .grid-button-wrapper:active { transform: scale(0.98); }
+        .grid-button-wrapper.active-room {
+           outline: 2px solid var(--primary-color);
+           border-radius: var(--ha-card-border-radius, 12px);
+        }
+      `;
+      shadow.appendChild(style);
+
+      this.content = document.createElement('div');
+      this.content.className = 'aad-container';
+      
+      this.content.innerHTML = `
+        <div class="aad-tabs" id="tabs-container" style="display: ${this._config.show_tabs ? 'flex' : 'none'};"></div>
+        <div class="aad-split-view pos-${this._config.room_position}" id="split-view">
+          <div class="aad-grid-panel" id="grid-container"></div>
+          <div class="aad-room-panel" id="room-container" style="display: none;">
+            <div class="aad-mobile-back" id="mobile-back">
+              <ha-icon icon="mdi:arrow-left"></ha-icon> Retour aux pièces
+            </div>
+            <div id="room-cards"></div>
+          </div>
+        </div>
+      `;
+
+      shadow.appendChild(this.content);
+      
+      shadow.getElementById('mobile-back').addEventListener('click', () => {
+        this._selectedAreaId = null;
+        this._updateGrid(); // Pour enlever la classe active
+        this._updateMobileVisibility();
+      });
+    }
+  }
+
+  _updateMobileVisibility() {
+    const splitView = this.content.querySelector('#split-view');
+    const roomContainer = this.content.querySelector('#room-container');
+    
+    if (this._selectedAreaId) {
+      splitView.classList.add('has-room');
+      roomContainer.style.display = 'flex';
+    } else {
+      splitView.classList.remove('has-room');
+      roomContainer.style.display = 'none';
+      const roomCardsEl = this.content.querySelector('#room-cards');
+      roomCardsEl.innerHTML = '';
+      this._roomCards = [];
+    }
+  }
+
+  _updateTabs() {
+    if (!this._config.show_tabs) return;
+    const tabsContainer = this.content.querySelector('#tabs-container');
+    tabsContainer.innerHTML = '';
+
+    // Détecter les étages depuis HA
+    const floors = this._hass.floors ? Object.values(this._hass.floors) : [];
+    
+    // Tab "Toutes"
+    const allTab = document.createElement('div');
+    allTab.className = `aad-tab ${this._activeFloorId === 'all' ? 'active' : ''}`;
+    allTab.innerText = "Toutes";
+    allTab.onclick = () => { this._activeFloorId = 'all'; this._updateTabs(); this._updateGrid(); };
+    tabsContainer.appendChild(allTab);
+
+    floors.sort((a, b) => (a.level || 0) - (b.level || 0)).forEach(floor => {
+      const tab = document.createElement('div');
+      tab.className = `aad-tab ${this._activeFloorId === floor.floor_id ? 'active' : ''}`;
+      tab.innerText = floor.name;
+      tab.onclick = () => { this._activeFloorId = floor.floor_id; this._updateTabs(); this._updateGrid(); };
+      tabsContainer.appendChild(tab);
+    });
+  }
+
+  async _updateGrid() {
+    const gridContainer = this.content.querySelector('#grid-container');
+    let areas = Object.values(this._hass.areas || {});
+    
+    const excludeList = (this._config.exclude || []).map(item => String(item).toLowerCase());
+    areas = areas.filter(area => !excludeList.includes(area.area_id.toLowerCase()) && !(area.name && excludeList.includes(area.name.toLowerCase())));
+
+    if (this._activeFloorId !== 'all') {
+      areas = areas.filter(area => area.floor_id === this._activeFloorId);
     }
 
-    const userLayout = config.layout || { type: "auto" };
-    const childCardsRaw = [];
+    const sortOrder = this._config.sort_by || "asc";
+    if (sortOrder === "asc") areas.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+    else if (sortOrder === "desc") areas.sort((a, b) => (b.name || "").localeCompare(a.name || ""));
+
+    const helpers = await window.loadCardHelpers();
+    gridContainer.innerHTML = '';
+    this._gridCards = [];
+
+    const baseButtonConfig = this._config.button || { type: "tile", entity: "this.area.entity" };
 
     areas.forEach(area => {
-      const areaId = area.area_id;
-      const areaName = area.name || areaId;
-      const areaSlug = areaId.toLowerCase().replace(/ /g, '_');
-      const areaIcon = area.icon || "mdi:home-outline";
+      const wrapper = document.createElement('div');
+      wrapper.className = `grid-button-wrapper ${this._selectedAreaId === area.area_id ? 'active-room' : ''}`;
+      
+      // On capture le clic en phase de "capture" pour déclencher l'ouverture de la pièce
+      wrapper.addEventListener('click', () => {
+        this._selectedAreaId = area.area_id;
+        this._updateGrid(); // Met à jour la surbrillance
+        this._renderRoom();
+        this._updateMobileVisibility();
+      }, { capture: true });
 
-      let defaultEntity = "sun.sun"; 
-      const lightEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('light.') && hass.entities[state.entity_id]?.area_id === areaId
-      );
-      if (lightEntity) {
-        defaultEntity = lightEntity.entity_id;
-      } else {
-        const switchEntity = Object.values(hass.states).find(state => 
-          (state.entity_id.startsWith('switch.') || state.entity_id.startsWith('input_boolean.')) && 
-          hass.entities[state.entity_id]?.area_id === areaId
-        );
-        if (switchEntity) defaultEntity = switchEntity.entity_id;
-      }
-
-      let areaTemp = "N/A";
-      const tempEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('sensor.') && 
-        (state.entity_id.includes('temperature') || state.attributes.device_class === 'temperature') && 
-        hass.entities[state.entity_id]?.area_id === areaId
-      );
-      if (tempEntity) areaTemp = tempEntity.state + (tempEntity.attributes.unit_of_measurement || '°C');
-
-      let areaHumidity = "N/A";
-      const humEntity = Object.values(hass.states).find(state => 
-        state.entity_id.startsWith('sensor.') && 
-        (state.entity_id.includes('humidity') || state.attributes.device_class === 'humidity') && 
-        hass.entities[state.entity_id]?.area_id === areaId
-      );
-      if (humEntity) areaHumidity = humEntity.state + (humEntity.attributes.unit_of_measurement || '%');
-
-      const areaData = {
-        id: areaId,
-        name: areaName,
-        slug: areaSlug,
-        icon: areaIcon,
-        entity: defaultEntity,
-        temperature: areaTemp,
-        humidity: areaHumidity
-      };
-
-      const processCard = (obj) => {
-        let str = JSON.stringify(obj);
-        str = str.replaceAll('this.area.id', areaData.id);
-        str = str.replaceAll('this.area.name', areaData.name);
-        str = str.replaceAll('this.area.slug', areaData.slug);
-        str = str.replaceAll('this.area.icon', areaData.icon);
-        str = str.replaceAll('this.area.entity', areaData.entity);
-        str = str.replaceAll('this.area.temperature', areaData.temperature);
-        str = str.replaceAll('this.area.humidity', areaData.humidity);
-        return JSON.parse(str);
-      };
-
-      if (config.card) {
-        try {
-          childCardsRaw.push(processCard(config.card));
-        } catch (e) {
-          console.error("Erreur template All Areas Display :", e);
-        }
-      }
+      const areaData = this._extractAreaData(area);
+      const floorData = this._extractFloorData(area.floor_id);
+      
+      const processedConfig = this._processTemplate(baseButtonConfig, areaData, floorData);
+      
+      const cardEl = helpers.createCardElement(processedConfig);
+      cardEl.hass = this._hass;
+      wrapper.appendChild(cardEl);
+      
+      gridContainer.appendChild(wrapper);
+      this._gridCards.push(cardEl);
     });
+  }
 
-    try {
-      const helpers = await window.loadCardHelpers();
-      this.content.innerHTML = '';
-      this._childElements = [];
+  async _renderRoom() {
+    if (!this._selectedAreaId) return;
+    
+    const roomCardsEl = this.content.querySelector('#room-cards');
+    const area = this._hass.areas[this._selectedAreaId];
+    if (!area) return;
 
-      if (userLayout.type === "auto") {
-        const targetMinWidth = userLayout.min_width || "150px";
-        
-        const autoGridWrapper = document.createElement("div");
-        autoGridWrapper.style.display = "grid";
-        // Utilisation de auto-fill à la place de auto-fit pour forcer l'alignement uniforme
-        autoGridWrapper.style.gridTemplateColumns = `repeat(auto-fill, minmax(${targetMinWidth}, 1fr))`;
-        autoGridWrapper.style.gap = "8px";
-        autoGridWrapper.style.width = "100%";
+    const areaData = this._extractAreaData(area);
+    const floorData = this._extractFloorData(area.floor_id);
+    const roomConfigs = this._config.room?.cards || [];
 
-        for (const cardConfig of childCardsRaw) {
-          const cardEl = helpers.createCardElement(cardConfig);
-          cardEl.hass = hass;
-          if (userLayout.square) {
-            cardEl.style.aspectRatio = "1 / 1";
-          }
-          autoGridWrapper.appendChild(cardEl);
-          this._childElements.push(cardEl);
-        }
-        this.content.appendChild(autoGridWrapper);
+    const helpers = await window.loadCardHelpers();
+    roomCardsEl.innerHTML = '';
+    this._roomCards = [];
 
-      } else {
-        const finalLayout = { ...userLayout };
-        if (finalLayout.type === "grid" && finalLayout.columns) {
-          finalLayout.columns = Math.max(2, finalLayout.columns);
-        }
-
-        const layoutConfig = { ...finalLayout, cards: childCardsRaw };
-        const element = helpers.createCardElement(layoutConfig);
-        element.hass = hass;
-        this.content.appendChild(element);
-        
-        setTimeout(() => {
-          if (element.shadowRoot) {
-            this._childElements = Array.from(element.shadowRoot.querySelectorAll("*"));
-          } else {
-            this._childElements = Array.from(element.querySelectorAll("*"));
-          }
-        }, 50);
-      }
-
-      this._renderedKey = currentRenderKey;
-
-    } catch (err) {
-      console.error("Erreur de rendu :", err);
-    } finally {
-      this._building = false;
+    for (const cardConfig of roomConfigs) {
+      const processedConfig = this._processTemplate(cardConfig, areaData, floorData);
+      const cardEl = helpers.createCardElement(processedConfig);
+      cardEl.hass = this._hass;
+      roomCardsEl.appendChild(cardEl);
+      this._roomCards.push(cardEl);
     }
+  }
+
+  _extractAreaData(area) {
+    const defaultEntityMatch = Object.values(this._hass.states).find(s => 
+      s.entity_id.startsWith('light.') && this._hass.entities[s.entity_id]?.area_id === area.area_id
+    ) || Object.values(this._hass.states).find(s => 
+      (s.entity_id.startsWith('switch.') || s.entity_id.startsWith('input_boolean.')) && this._hass.entities[s.entity_id]?.area_id === area.area_id
+    );
+
+    return {
+      id: area.area_id,
+      name: area.name || area.area_id,
+      entity: defaultEntityMatch ? defaultEntityMatch.entity_id : "sun.sun",
+      icon: area.icon || "mdi:home-outline"
+    };
+  }
+
+  _extractFloorData(floorId) {
+    if (!floorId || !this._hass.floors || !this._hass.floors[floorId]) {
+      return { id: "unknown", name: "Inconnu" };
+    }
+    const floor = this._hass.floors[floorId];
+    return {
+      id: floor.floor_id,
+      name: floor.name || floor.floor_id
+    };
+  }
+
+  _processTemplate(obj, areaData, floorData) {
+    let str = JSON.stringify(obj);
+    str = str.replaceAll('this.area.id', areaData.id);
+    str = str.replaceAll('this.area.name', areaData.name);
+    str = str.replaceAll('this.area.entity', areaData.entity);
+    str = str.replaceAll('this.area.icon', areaData.icon);
+    
+    str = str.replaceAll('this.floor.id', floorData.id);
+    str = str.replaceAll('this.floor.name', floorData.name);
+    
+    return JSON.parse(str);
   }
 
   getCardSize() { return 4; }
 }
 customElements.define('all-areas-display', AllAreasDisplay);
 
-// Enregistrement de la carte
 window.customCards = window.customCards || [];
 if (!window.customCards.some(c => c.type === 'all-areas-display')) {
   window.customCards.push({
     type: "all-areas-display",
     name: "All areas display",
     preview: true,
-    description: "Multiplie une carte pour chaque pièce Lovelace détectée."
+    description: "Tableau de bord multi-pièces avec Split-View et Onglets auto."
   });
 }
